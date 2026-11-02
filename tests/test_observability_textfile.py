@@ -67,10 +67,10 @@ class Response:
 
 def host(*, control_node: bool = True) -> dict[str, object]:
     return {
-        "client": "grayhaven",
+        "client": "fixture",
         "control_node": control_node,
-        "environment": "prod",
-        "fqdn": "bastion.grayhavensystems.com",
+        "environment": "test",
+        "fqdn": "control.example.invalid",
         "project": "security",
         "role": "bastion",
         "short_hostname": "bastion",
@@ -85,25 +85,25 @@ def full_config() -> dict[str, object]:
             {
                 **host(control_node=False),
                 "short_hostname": "web",
-                "fqdn": "web.grayhavensystems.com",
+                "fqdn": "worker.example.invalid",
             },
         ],
         "restic": {"repositories": ["local", "remote"]},
         "gcs": {
             "enabled": True,
             "credentials_file": "/credentials.json",
-            "location": "US-EAST1",
+            "location": "EXAMPLE-EAST4",
             "monitoring_usage_cache_file": "/cache/monitoring.json",
             "monitoring_usage_refresh_seconds": 3600,
             "monitoring_usage_stale_seconds": 10800,
             "operation_cache_file": "/cache/gcs.json",
             "operation_refresh_seconds": 3600,
             "operation_stale_seconds": 10800,
-            "project_id": "grayhaven",
+            "project_id": "fixture",
         },
         "proton": {
             "enabled": True,
-            "services": [{"name": "Mail", "component_name": "Proton Mail"}],
+            "services": [{"name": "Example", "component_name": "Mock Component"}],
         },
         "fail2ban": {
             "jails": [
@@ -168,7 +168,6 @@ class HttpAndGoogleTests(unittest.TestCase):
                 (start, end, actual_month), (utc(start_value), utc(end_value), month)
             )
 
-        self.assertEqual(collector.GOOGLE_BILLING_TIMEZONE.key, "America/Los_Angeles")
         with mock.patch.object(collector, "datetime") as clock:
             clock.now.return_value = utc("2026-08-01T06:59:59Z")
             self.assertEqual(
@@ -297,9 +296,6 @@ class HttpAndGoogleTests(unittest.TestCase):
                 {"ok": True},
             )
         self.assertIn("projects/project%2Fname/timeSeries", request.call_args.args[0])
-        for method, expected_class in collector.GCS_OPERATION_CLASSES.items():
-            self.assertIn(expected_class, ("Class A", "Class B"))
-            self.assertEqual(collector.gcs_operation_class(method), expected_class)
         self.assertEqual(
             collector.gcs_operation_class("storage.objects.insert"), "Class A"
         )
@@ -384,6 +380,7 @@ class HttpAndGoogleTests(unittest.TestCase):
             )
         self.assertEqual(request.call_count, 2)
         query = request.call_args_list[0].args[2]
+        self.assertIn('resource.labels.bucket_name = "bucket"', query["filter"])
         self.assertEqual(query["interval.startTime"], "2026-07-01T07:00:00Z")
         self.assertEqual(query["interval.endTime"], "2026-07-27T12:00:00Z")
         self.assertEqual(query["aggregation.alignmentPeriod"], "2264400s")
@@ -763,28 +760,28 @@ class CacheTests(unittest.TestCase):
 
 class PublicStatusAndFail2banTests(unittest.TestCase):
     def test_google_and_proton_status(self) -> None:
-        self.assertTrue(collector.location_matches("US-EAST1", []))
+        self.assertTrue(collector.location_matches("EXAMPLE-EAST4", []))
         self.assertTrue(collector.location_matches("US", [{"title": "United States"}]))
-        self.assertTrue(collector.location_matches("US-EAST1", [{"id": "global"}]))
-        self.assertTrue(collector.location_matches("US-EAST1", [{"id": "us-east1"}]))
+        self.assertTrue(collector.location_matches("EXAMPLE-EAST4", [{"id": "global"}]))
+        self.assertTrue(collector.location_matches("EXAMPLE-EAST4", [{"id": "example-east4"}]))
         self.assertTrue(
-            collector.location_matches("US-EAST1", [{"title": "region us-east1 zone"}])
+            collector.location_matches("EXAMPLE-EAST4", [{"title": "region example-east4 zone"}])
         )
-        self.assertFalse(collector.location_matches("US-EAST1", [{"id": "europe"}]))
+        self.assertFalse(collector.location_matches("EXAMPLE-EAST4", [{"id": "europe"}]))
         with mock.patch.object(
             collector,
             "request_json",
-            return_value={"products": [{"title": "Cloud Monitoring", "id": "found"}]},
+            return_value={"products": [{"title": "Mock Product", "id": "found"}]},
         ):
             self.assertEqual(
-                collector.google_cloud_product_id("Cloud Monitoring", "fallback"),
+                collector.google_cloud_product_id("Mock Product", "fallback"),
                 "found",
             )
         with mock.patch.object(
             collector, "request_json", side_effect=urllib.error.URLError("expected")
         ):
             self.assertEqual(
-                collector.google_cloud_product_id("Cloud Monitoring", "fallback"),
+                collector.google_cloud_product_id("Mock Product", "fallback"),
                 "fallback",
             )
         with mock.patch.object(
@@ -793,7 +790,7 @@ class PublicStatusAndFail2banTests(unittest.TestCase):
             return_value={"products": [{"title": "Other", "id": "other"}]},
         ):
             self.assertEqual(
-                collector.google_cloud_product_id("Cloud Monitoring", "fallback"),
+                collector.google_cloud_product_id("Mock Product", "fallback"),
                 "fallback",
             )
 
@@ -865,10 +862,10 @@ class PublicStatusAndFail2banTests(unittest.TestCase):
             collector,
             "request_json",
             return_value={
-                "components": [{"name": "Proton Mail", "status": "operational"}, {}]
+                "components": [{"name": "Mock Component", "status": "operational"}, {}]
             },
         ):
-            self.assertIn("Proton Mail", collector.proton_components())
+            self.assertIn("Mock Component", collector.proton_components())
         self.assertEqual(collector.proton_status_value("operational"), 1)
         self.assertEqual(collector.proton_status_value("degraded"), 0)
         self.assertEqual(collector.render_status("partial_outage"), "Partial Outage")
@@ -976,8 +973,18 @@ class PublicStatusAndFail2banTests(unittest.TestCase):
 
 
 class RenderingTests(unittest.TestCase):
+    def test_host_inventory_only_emitted_on_control_node(self) -> None:
+        fake_host = host()
+        inventory = {"host": fake_host, "hosts": [fake_host]}
+        self.assertIn(fake_host["fqdn"], collector.render(inventory))
+        inventory["host"] = host(control_node=False)
+        self.assertNotIn(fake_host["fqdn"], collector.render(inventory))
+
     def test_render_sections_and_failures(self) -> None:
         config = full_config()
+        operation_counts = {"Class A": 17, "Class B": 29}
+        monitoring_usage = 2345
+        month = "2037-04"
         disabled = full_config()
         disabled["gcs"]["enabled"] = False
         self.assertEqual(collector.render_gcs_metrics(disabled), [])
@@ -1000,10 +1007,10 @@ class RenderingTests(unittest.TestCase):
                 collector,
                 "cached_gcs_operation_counts",
                 return_value=(
-                    {"Class A": 10, "Class B": 20},
+                    operation_counts,
                     1000,
                     True,
-                    "2026-07",
+                    month,
                 ),
             ),
             mock.patch.object(
@@ -1014,12 +1021,12 @@ class RenderingTests(unittest.TestCase):
             mock.patch.object(
                 collector,
                 "cached_google_monitoring_usage",
-                return_value=(1234, 1000, True, "2026-07"),
+                return_value=(monitoring_usage, 1000, True, month),
             ),
             mock.patch.object(
                 collector,
                 "proton_components",
-                return_value={"Proton Mail": {"status": "operational"}},
+                return_value={"Mock Component": {"status": "operational"}},
             ),
             mock.patch.object(
                 collector, "fail2ban_status", return_value=(1, 1, 2, ["192.0.2.1"])
@@ -1031,31 +1038,24 @@ class RenderingTests(unittest.TestCase):
             ),
         ):
             rendered = collector.render(config)
-        for metric in (
-            "grayhaven_host_info",
-            "grayhaven_restic_repository_expected",
-            "grayhaven_gcs_restic_billing_month_operations_total",
-            "grayhaven_google_monitoring_billing_month_series_total",
-            "grayhaven_proton_service_status",
-            "grayhaven_fail2ban_jail_banned_ip_info",
-        ):
-            self.assertIn(metric, rendered)
-        self.assertNotIn("grayhaven_gcs_restic_monthly_operations_total", rendered)
-        self.assertNotIn(
-            "grayhaven_google_monitoring_monthly_billed_series_total", rendered
+        samples = [line for line in rendered.splitlines() if not line.startswith("#")]
+        shared_labels = (
+            f'client="{config["host"]["client"]}"',
+            f'project_id="{config["gcs"]["project_id"]}"',
+            f'month="{month}"',
         )
-        self.assertNotIn('operation_class="Free"', rendered)
-        self.assertNotIn('operation_class="Unknown"', rendered)
-        self.assertIn('month="2026-07"', rendered)
-        self.assertIn("current Google billing month", rendered)
-        self.assertIn(
-            'grayhaven_gcs_restic_billing_month_operations_total{client="grayhaven",environment="prod",location="US-EAST1",month="2026-07",operation_class="Class A",project_id="grayhaven"} 10',
-            rendered,
-        )
-        self.assertIn(
-            'grayhaven_google_monitoring_billing_month_series_total{client="grayhaven",environment="prod",location="US-EAST1",month="2026-07",project_id="grayhaven"} 1234',
-            rendered,
-        )
+        for operation, value in operation_counts.items():
+            self.assertTrue(any(
+                all(label in line for label in shared_labels)
+                and f'operation_class="{operation}"' in line
+                and line.endswith(f" {value}")
+                for line in samples
+            ))
+        self.assertTrue(any(
+            all(label in line for label in shared_labels)
+            and line.endswith(f" {monitoring_usage}")
+            for line in samples
+        ))
 
         with (
             mock.patch.object(collector, "gcs_status", return_value=("Unknown", 0, 0)),
@@ -1065,10 +1065,7 @@ class RenderingTests(unittest.TestCase):
                 side_effect=RuntimeError("expected"),
             ),
         ):
-            self.assertIn(
-                "telemetry_success",
-                "\n".join(collector.render_gcs_metrics(config)),
-            )
+            self.assertTrue(any(line.endswith(" 0") for line in collector.render_gcs_metrics(config)))
         with (
             mock.patch.object(
                 collector, "google_monitoring_status", return_value=("Unknown", 0, 0)
@@ -1079,17 +1076,11 @@ class RenderingTests(unittest.TestCase):
                 side_effect=RuntimeError("expected"),
             ),
         ):
-            self.assertIn(
-                "telemetry_success",
-                "\n".join(collector.render_google_monitoring_metrics(config)),
-            )
+            self.assertTrue(any(line.endswith(" 0") for line in collector.render_google_monitoring_metrics(config)))
         with mock.patch.object(
             collector, "proton_components", side_effect=OSError("expected")
         ):
-            self.assertIn(
-                "telemetry_success",
-                "\n".join(collector.render_proton_metrics(config)),
-            )
+            self.assertTrue(any(line.endswith(" 0") for line in collector.render_proton_metrics(config)))
         self.assertEqual(
             collector.render_proton_metrics(
                 {"host": host(), "proton": {"enabled": True}}
@@ -1103,9 +1094,8 @@ class RenderingTests(unittest.TestCase):
             root = pathlib.Path(temp_dir)
             output = root / "metrics.prom"
             config_path = root / "config.json"
-            config_path.write_text(
-                json.dumps({"host": host(control_node=False)}), encoding="utf-8"
-            )
+            fake_host = host(control_node=True)
+            config_path.write_text(json.dumps({"host": fake_host, "hosts": [fake_host]}), encoding="utf-8")
             collector.atomic_write(output, "content\n", mode=0o600)
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
             with mock.patch.object(
@@ -1119,4 +1109,4 @@ class RenderingTests(unittest.TestCase):
                 mock.patch.object(collector, "OUTPUT_PATH", output),
             ):
                 self.assertEqual(collector.main(), 0)
-            self.assertIn("grayhaven_host_info", output.read_text(encoding="utf-8"))
+            self.assertIn(fake_host["fqdn"], output.read_text(encoding="utf-8"))

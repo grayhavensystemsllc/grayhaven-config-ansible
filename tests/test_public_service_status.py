@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from tests.helpers import load_program
+from tests.test_alert_sync import validator
 
 collector = load_program(
     "public_status_collector",
@@ -131,11 +132,7 @@ class PublicStatusTests(unittest.TestCase):
                 "evaluation_group": "fixture-group",
                 "contact_point": "fixture-contact",
             },
-            "uid_registry": {
-                "service:Example:example_telemetry_success": "gh-" + "1" * 24,
-                "service:Example First:example_service_status": "gh-" + "2" * 24,
-                "service:Example Second:example_service_status": "gh-" + "3" * 24,
-            },
+            "uid_registry": validator.FixtureRegistry(),
         }
         rules = alerts.public_status_rules(settings, "fixture-folder", "fixture-source")
         self.assertEqual(len(rules), 1 + len(providers()["example"]["components"]))

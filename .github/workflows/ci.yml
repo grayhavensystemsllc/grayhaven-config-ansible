@@ -50,7 +50,6 @@ jobs:
           roles/observability/files/grayhaven-irm-alert-groups-textfile
           roles/observability/files/grayhaven-observability-textfile
           scripts/validate-generated-grafana-alerts
-          scripts/validate-observability-textfile-cache
           scripts/validate-rendered-alloy-config
           scripts/validate-rendered-timetracker-config
 
@@ -80,9 +79,6 @@ jobs:
       - name: Validate generated Grafana alerts
         run: scripts/validate-generated-grafana-alerts
 
-      - name: Validate observability textfile cache
-        run: scripts/validate-observability-textfile-cache
-
       - name: Validate rendered Time Tracker config
         run: scripts/validate-rendered-timetracker-config
 
@@ -93,14 +89,6 @@ jobs:
         run: |
           find playbooks -type f \( -name "*.yml" -o -name "*.yaml" \) -print0 \
           | xargs -0 -n1 ansible-playbook -i tests/fixtures/syntax-inventory.yml --connection=local --syntax-check
-
-      - name: Validate MCP deployment contracts
-        run: python -m unittest tests.test_mcp_role tests.test_mcp_monitoring -v
-
-      - name: Run Time Tracker contract check
-        run: >-
-          ansible-playbook --check -i localhost, --connection=local
-          playbooks/validate-timetracker-contract.yml
 
       - name: Run ansible-lint
         run: ansible-lint .

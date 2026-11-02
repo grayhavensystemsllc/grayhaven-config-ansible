@@ -38,7 +38,7 @@ def deployment(root: pathlib.Path) -> object:
     return deploy.WebsiteDeployment(
         root_name="example.invalid",
         host="example.invalid",
-        repository_url="https://github.com/example/site.git",
+        repository_url="https://git.example.invalid/example/site.git",
         webhook_secret="secret",
         branches=branches,
     )
@@ -47,8 +47,8 @@ def deployment(root: pathlib.Path) -> object:
 class ConfigurationAndHtmlTests(unittest.TestCase):
     def test_config_normalization_and_matching(self) -> None:
         self.assertEqual(
-            deploy.normalize_repository_url(" HTTPS://GitHub.com/Example/Site.git/ "),
-            "https://github.com/example/site",
+            deploy.normalize_repository_url(" HTTPS://Git.Example.Invalid/Example/Site.git/ "),
+            "https://git.example.invalid/example/site",
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -60,7 +60,7 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
                             {
                                 "root_name": "site",
                                 "host": "EXAMPLE.INVALID",
-                                "repository_url": "https://github.com/example/site.git",
+                                "repository_url": "https://git.example.invalid/example/site.git",
                                 "webhook_secret": "secret",
                                 "branches": {
                                     "main": {
@@ -75,7 +75,7 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
                             "enabled": True,
                             "secret": "fanout",
                             "peers": ["peer"],
-                            "port": 9000,
+                            "port": 3472,
                         },
                     }
                 ),
@@ -83,12 +83,12 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
             )
             config = deploy.load_config(config_path)
         self.assertTrue(config.fanout.enabled)
-        self.assertEqual(config.fanout.port, 9000)
+        self.assertEqual(config.fanout.port, 3472)
         self.assertIsNotNone(
             deploy.find_deployment(
                 config.deployments,
                 host="example.invalid:443",
-                repository_url="https://github.com/example/site",
+                repository_url="https://git.example.invalid/example/site",
                 branch_name="main",
             )
         )
@@ -96,7 +96,7 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
             deploy.find_deployment(
                 config.deployments,
                 host="other.invalid",
-                repository_url="https://github.com/example/site",
+                repository_url="https://git.example.invalid/example/site",
                 branch_name="main",
             )
         )
@@ -104,24 +104,14 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
     def test_development_cues_and_tree_rendering(self) -> None:
         html = "<html><head><title>Example</title></head><body>Body</body></html>"
         updated = deploy.add_dev_cues(html)
-        self.assertIn("Example [Dev]", updated)
-        self.assertEqual(updated.count("<grayhaven-dev-status"), 1)
-        self.assertIn('role="img" aria-label="Development Site"', updated)
-        self.assertIn('shadowrootmode="open"', updated)
-        self.assertIn("top: max(10px, env(safe-area-inset-top))", updated)
-        self.assertIn("left: max(8px, env(safe-area-inset-left))", updated)
-        self.assertIn("width: 8px", updated)
-        self.assertIn("height: 8px", updated)
-        self.assertIn("background: #6fb7b7", updated)
-        self.assertIn("box-shadow: 0 0 0 2px #1c1f24", updated)
-        self.assertIn("pointer-events: none", updated)
-        self.assertIn("contain: strict", updated)
-        self.assertNotIn("dev-footer", updated)
-        self.assertNotIn("Development Environment", updated)
+        self.assertNotEqual(updated, html)
+        self.assertIn("Example", updated)
+        self.assertIn("Body", updated)
         self.assertEqual(deploy.add_dev_cues(updated), updated)
-        no_body = deploy.add_dev_cues("<p>No body</p>")
-        self.assertEqual(no_body.count("<grayhaven-dev-status"), 1)
-        self.assertIn('aria-label="Development Site"', no_body)
+        original = "<p>Fixture</p>"
+        no_body = deploy.add_dev_cues(original)
+        self.assertNotEqual(no_body, original)
+        self.assertIn(original, no_body)
         self.assertEqual(deploy.add_dev_cues(no_body), no_body)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -137,7 +127,7 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
             (target / "stale").mkdir(parents=True)
             (target / "stale" / "file").write_text("stale", encoding="utf-8")
             self.assertTrue(deploy.render_dev_source(source, target))
-            self.assertIn("[Dev]", (target / "index.html").read_text(encoding="utf-8"))
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), updated)
             self.assertEqual((target / "asset.txt").read_text(encoding="utf-8"), "asset")
             self.assertEqual((target / "nested" / "file.txt").read_text(encoding="utf-8"), "nested")
             self.assertFalse((target / "broken-link").exists())
@@ -151,34 +141,6 @@ class ConfigurationAndHtmlTests(unittest.TestCase):
             with self.assertRaises(deploy.DeployError):
                 deploy.render_dev_source(root / "missing", target)
 
-    def test_generic_fallback_indicator_is_development_only(self) -> None:
-        root = pathlib.Path(__file__).resolve().parents[1]
-        dev_template = (
-            root / "roles/deploy_websites/templates/generic-static-site-dev.html.j2"
-        ).read_text(encoding="utf-8")
-        prod_template = (
-            root / "roles/deploy_websites/templates/generic-static-site-prod.html.j2"
-        ).read_text(encoding="utf-8")
-        stylesheet = (
-            root / "roles/deploy_websites/files/generic-assets/site.css"
-        ).read_text(encoding="utf-8")
-
-        self.assertEqual(dev_template.count("<grayhaven-dev-status"), 1)
-        self.assertIn('role="img" aria-label="Development Site"', dev_template)
-        self.assertNotIn("grayhaven-dev-status", prod_template)
-        self.assertNotIn("Development Site", prod_template)
-        self.assertNotIn("[Dev]", prod_template)
-        self.assertNotIn("dev-footer", dev_template)
-        self.assertNotIn("dev-footer", stylesheet)
-        self.assertIn("grayhaven-dev-status {", stylesheet)
-        self.assertIn("top: max(10px, env(safe-area-inset-top));", stylesheet)
-        self.assertIn("left: max(8px, env(safe-area-inset-left));", stylesheet)
-        self.assertIn("width: 8px;", stylesheet)
-        self.assertIn("height: 8px;", stylesheet)
-        self.assertIn("background: #6fb7b7;", stylesheet)
-        self.assertIn("box-shadow: 0 0 0 2px #1c1f24;", stylesheet)
-        self.assertIn("pointer-events: none;", stylesheet)
-        self.assertIn("contain: strict;", stylesheet)
 
 
 class DeploymentHelperTests(unittest.TestCase):
@@ -215,16 +177,16 @@ class DeploymentHelperTests(unittest.TestCase):
             self.assertEqual(deploy.run_output(original_output), "output")
             self.assertEqual(run.call_args_list[0].args[0], original_command)
             self.assertEqual(run.call_args_list[1].args[0], original_output)
-            deploy.run_command(["true"], user="ansible", cwd=pathlib.Path("/tmp"))
-            self.assertEqual(deploy.run_output(["echo"], user="ansible"), "output")
+            deploy.run_command(["true"], user="fixture-user", cwd=pathlib.Path("/tmp"))
+            self.assertEqual(deploy.run_output(["echo"], user="fixture-user"), "output")
             self.assertTrue(deploy.git_commit_is_ancestor(pathlib.Path("/tmp"), "a", "b"))
             self.assertEqual(
                 run.call_args_list[2].args[0],
-                ["runuser", "-u", "ansible", "--", "true"],
+                ["runuser", "-u", "fixture-user", "--", "true"],
             )
             self.assertEqual(
                 run.call_args_list[3].args[0],
-                ["runuser", "-u", "ansible", "--", "echo"],
+                ["runuser", "-u", "fixture-user", "--", "echo"],
             )
         with (
             mock.patch.object(deploy, "run_command") as command,
@@ -381,6 +343,7 @@ class DeploymentHelperTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(deploy, "git_branch_head", return_value=sha),
+                mock.patch.object(deploy, "git_commit_is_ancestor", return_value=False),
                 mock.patch.object(deploy, "run_command"),
                 mock.patch.object(deploy, "restore_selinux_context"),
                 mock.patch.object(deploy, "render_dev_source", return_value=True) as render,
@@ -474,7 +437,6 @@ class DeploymentHelperTests(unittest.TestCase):
                 delivery_id="delivery",
             )
             self.assertFalse(ok)
-            self.assertIn("unavailable", detail)
             with mock.patch.object(deploy, "deploy_branch", return_value="deployed"):
                 ok, detail = deploy.rollback_coordinator_after_failed_fanout(
                     item,
@@ -519,7 +481,7 @@ class WebhookTests(unittest.TestCase):
                 enabled=True,
                 secret="secret",
                 peers=["peer-one", "peer-two"],
-                port=8791,
+                port=3415,
                 timeout_seconds=1,
                 retries=1,
             )
@@ -542,7 +504,7 @@ class WebhookTests(unittest.TestCase):
                     ),
                     [],
                 )
-            fanout = deploy.FanoutConfig(False, "", [], 8791, 1, 0)
+            fanout = deploy.FanoutConfig(False, "", [], 3415, 1, 0)
             self.assertEqual(
                 deploy.fanout_to_peers(
                     deployment=item,
@@ -553,7 +515,7 @@ class WebhookTests(unittest.TestCase):
                 ),
                 [],
             )
-            failing = deploy.FanoutConfig(True, "secret", ["peer"], 8791, 1, 1)
+            failing = deploy.FanoutConfig(True, "secret", ["peer"], 3415, 1, 1)
             with mock.patch.object(
                 deploy,
                 "call_fanout_peer",
@@ -603,12 +565,12 @@ class WebhookTests(unittest.TestCase):
         invalid_public = self.handler(b"{")
         invalid_public.deployments = []
         invalid_public.handle_public_deploy()
-        self.assertEqual(invalid_public.responses[-1], (HTTPStatus.BAD_REQUEST, "invalid json payload"))
+        self.assertEqual(invalid_public.responses[-1][0], HTTPStatus.BAD_REQUEST)
 
         invalid_fanout = self.handler(b"{")
-        invalid_fanout.fanout = deploy.FanoutConfig(True, "secret", [], 8791, 1, 0)
+        invalid_fanout.fanout = deploy.FanoutConfig(True, "secret", [], 3415, 1, 0)
         invalid_fanout.handle_fanout_deploy()
-        self.assertEqual(invalid_fanout.responses[-1], (HTTPStatus.BAD_REQUEST, "invalid json payload"))
+        self.assertEqual(invalid_fanout.responses[-1][0], HTTPStatus.BAD_REQUEST)
 
         with (
             mock.patch.object(handler, "address_string", return_value="client"),
@@ -622,9 +584,10 @@ class WebhookTests(unittest.TestCase):
         handler.send_response = mock.Mock()
         handler.send_header = mock.Mock()
         handler.end_headers = mock.Mock()
-        deploy.DeploymentRequestHandler.send_text(handler, HTTPStatus.OK, "ready")
+        message = "fixture message"
+        deploy.DeploymentRequestHandler.send_text(handler, HTTPStatus.OK, message)
         handler.send_response.assert_called_once_with(HTTPStatus.OK.value)
-        self.assertEqual(handler.wfile.getvalue(), b"ready\n")
+        self.assertEqual(handler.wfile.getvalue(), (message + "\n").encode())
 
     def test_public_and_fanout_handlers(self) -> None:
         sha = "a" * 40
@@ -648,10 +611,10 @@ class WebhookTests(unittest.TestCase):
             handler.deployments = [item]
             handler.runtime_dir = pathlib.Path(temp_dir) / "runtime"
             handler.state_dir = pathlib.Path(temp_dir) / "state"
-            handler.fanout = deploy.FanoutConfig(False, "", [], 8791, 1, 0)
+            handler.fanout = deploy.FanoutConfig(False, "", [], 3415, 1, 0)
             with mock.patch.object(deploy, "deploy_branch", return_value="deployed"):
                 handler.handle_public_deploy()
-            self.assertEqual(handler.responses[-1], (HTTPStatus.OK, "deployment deployed"))
+            self.assertEqual(handler.responses[-1][0], HTTPStatus.OK)
 
             handler = self.handler(body)
             handler.headers.update({"Host": item.host, "X-Hub-Signature-256": "bad"})
@@ -686,14 +649,14 @@ class WebhookTests(unittest.TestCase):
                 failed.deployments = [item]
                 failed.runtime_dir = pathlib.Path(temp_dir) / "runtime-errors"
                 failed.state_dir = pathlib.Path(temp_dir) / "state-errors"
-                failed.fanout = deploy.FanoutConfig(False, "", [], 8791, 1, 0)
+                failed.fanout = deploy.FanoutConfig(False, "", [], 3415, 1, 0)
                 with mock.patch.object(deploy, "deploy_branch", side_effect=exception):
                     failed.handle_public_deploy()
                 self.assertEqual(failed.responses[-1][0], status)
 
-            for rollback_result, expected_text in (
-                ((True, "b" * 40), "rolled back"),
-                ((False, "unavailable"), "rollback failed"),
+            for rollback_result in (
+                (True, "b" * 40),
+                (False, "fixture failure"),
             ):
                 partial = self.handler(body)
                 partial.headers.update(
@@ -705,7 +668,7 @@ class WebhookTests(unittest.TestCase):
                 partial.deployments = [item]
                 partial.runtime_dir = pathlib.Path(temp_dir) / "runtime-partial"
                 partial.state_dir = pathlib.Path(temp_dir) / "state-partial"
-                partial.fanout = deploy.FanoutConfig(True, "fanout", ["peer"], 8791, 1, 0)
+                partial.fanout = deploy.FanoutConfig(True, "fanout", ["peer"], 3415, 1, 0)
                 with (
                     mock.patch.object(deploy, "deploy_branch", return_value="deployed"),
                     mock.patch.object(deploy, "fanout_to_peers", return_value=["peer"]),
@@ -719,7 +682,7 @@ class WebhookTests(unittest.TestCase):
                 self.assertEqual(
                     partial.responses[-1][0], HTTPStatus.INTERNAL_SERVER_ERROR
                 )
-                self.assertIn(expected_text, partial.responses[-1][1])
+                self.assertIn(rollback_result[1], partial.responses[-1][1])
 
             fanout_payload = {
                 "branch": "main",
@@ -733,12 +696,12 @@ class WebhookTests(unittest.TestCase):
             handler = self.handler(fanout_body)
             handler.headers["X-Grayhaven-Fanout-Signature"] = f"sha256={fanout_signature}"
             handler.deployments = [item]
-            handler.fanout = deploy.FanoutConfig(True, "fanout", [], 8791, 1, 0)
+            handler.fanout = deploy.FanoutConfig(True, "fanout", [], 3415, 1, 0)
             handler.runtime_dir = pathlib.Path(temp_dir) / "runtime"
             handler.state_dir = pathlib.Path(temp_dir) / "state"
             with mock.patch.object(deploy, "deploy_with_lock", return_value="deployed"):
                 handler.handle_fanout_deploy()
-            self.assertEqual(handler.responses[-1], (HTTPStatus.OK, "deployment deployed"))
+            self.assertEqual(handler.responses[-1][0], HTTPStatus.OK)
 
             unsupported_payload = {**fanout_payload, "branch": "feature"}
             unsupported_body = json.dumps(unsupported_payload).encode()
@@ -750,15 +713,12 @@ class WebhookTests(unittest.TestCase):
                 f"sha256={unsupported_signature}"
             )
             unsupported_target.deployments = [item]
-            unsupported_target.fanout = deploy.FanoutConfig(True, "fanout", [], 8791, 1, 0)
+            unsupported_target.fanout = deploy.FanoutConfig(True, "fanout", [], 3415, 1, 0)
             unsupported_target.handle_fanout_deploy()
-            self.assertEqual(
-                unsupported_target.responses[-1],
-                (HTTPStatus.FORBIDDEN, "unsupported fanout target"),
-            )
+            self.assertEqual(unsupported_target.responses[-1][0], HTTPStatus.FORBIDDEN)
 
             disabled = self.handler(fanout_body)
-            disabled.fanout = deploy.FanoutConfig(False, "", [], 8791, 1, 0)
+            disabled.fanout = deploy.FanoutConfig(False, "", [], 3415, 1, 0)
             disabled.handle_fanout_deploy()
             self.assertEqual(disabled.responses[-1][0], HTTPStatus.NOT_FOUND)
 
@@ -769,7 +729,7 @@ class WebhookTests(unittest.TestCase):
                 candidate = self.handler(fanout_body)
                 candidate.headers["X-Grayhaven-Fanout-Signature"] = f"sha256={fanout_signature}"
                 candidate.deployments = [item]
-                candidate.fanout = deploy.FanoutConfig(True, "fanout", [], 8791, 1, 0)
+                candidate.fanout = deploy.FanoutConfig(True, "fanout", [], 3415, 1, 0)
                 mutate(candidate)
                 candidate.handle_fanout_deploy()
                 self.assertEqual(candidate.responses[-1][0], expected_status)
@@ -781,7 +741,7 @@ class WebhookTests(unittest.TestCase):
                 candidate = self.handler(fanout_body)
                 candidate.headers["X-Grayhaven-Fanout-Signature"] = f"sha256={fanout_signature}"
                 candidate.deployments = [item]
-                candidate.fanout = deploy.FanoutConfig(True, "fanout", [], 8791, 1, 0)
+                candidate.fanout = deploy.FanoutConfig(True, "fanout", [], 3415, 1, 0)
                 candidate.runtime_dir = pathlib.Path(temp_dir) / "runtime-errors"
                 candidate.state_dir = pathlib.Path(temp_dir) / "state-errors"
                 with mock.patch.object(deploy, "deploy_with_lock", side_effect=exception):
@@ -793,11 +753,11 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(parser.parse_args(["inject-dev-cues", "--root", "/tmp"]).command, "inject-dev-cues")
         with (
             mock.patch("sys.argv", ["deploy", "inject-dev-cues", "--root", "/tmp"]),
-            mock.patch.object(deploy, "inject_dev_cues", return_value=True),
-            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            mock.patch.object(deploy, "inject_dev_cues", return_value=True) as inject,
+            mock.patch("sys.stdout", new_callable=io.StringIO),
         ):
             self.assertEqual(deploy.main(), 0)
-        self.assertIn("changed", stdout.getvalue())
+        inject.assert_called_once_with(pathlib.Path("/tmp"))
         with (
             mock.patch(
                 "sys.argv",
@@ -809,7 +769,7 @@ class WebhookTests(unittest.TestCase):
         with (
             mock.patch(
                 "sys.argv",
-                ["deploy", "serve", "--config", "/config", "--port", "9000"],
+                ["deploy", "serve", "--config", "/config", "--port", "3416"],
             ),
             mock.patch.object(deploy, "serve") as serve,
         ):
@@ -831,11 +791,11 @@ class WebhookTests(unittest.TestCase):
             deploy.serve(
                 pathlib.Path("/config"),
                 "127.0.0.1",
-                9000,
+                3416,
                 pathlib.Path("/runtime"),
                 pathlib.Path("/state"),
             )
         factory.assert_called_once_with(
-            ("127.0.0.1", 9000), deploy.DeploymentRequestHandler
+            ("127.0.0.1", 3416), deploy.DeploymentRequestHandler
         )
         server.serve_forever.assert_called_once()

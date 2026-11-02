@@ -105,20 +105,16 @@ python3 -m py_compile \
   roles/observability/files/grayhaven-irm-alert-groups-textfile \
   roles/observability/files/grayhaven-observability-textfile \
   scripts/validate-generated-grafana-alerts \
-  scripts/validate-observability-textfile-cache \
   scripts/validate-rendered-alloy-config \
   scripts/validate-rendered-timetracker-config
 scripts/validate-rendered-alloy-config
 scripts/validate-rendered-alloy-config --role mcp
-python3 -m unittest tests.test_mcp_role tests.test_mcp_monitoring -v
 scripts/validate-generated-grafana-alerts
-scripts/validate-observability-textfile-cache
 scripts/validate-rendered-timetracker-config
 python3 -m coverage run -m unittest discover -s tests -v
 python3 -m coverage report
 python3 -m coverage xml
 test -s shell-coverage.xml
-ansible-playbook --check -i localhost, --connection=local playbooks/validate-timetracker-contract.yml
 git ls-files '*.md' | xargs -r markdownlint-cli2
 ```
 

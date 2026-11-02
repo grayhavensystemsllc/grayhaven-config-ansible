@@ -9,16 +9,16 @@ tests:
   - interval: 1m
     input_series:
       - series: >-
-          node_cpu_seconds_total{host="web.example.invalid",environment="test",role="web",
+          node_cpu_seconds_total{host="worker.example.invalid",environment="test",role="worker",
           project="example",client="example",mode="idle"}
         values: '0+6x15'
       - series: >-
           node_systemd_unit_state{host="control.example.invalid",
-          name="grayhaven-ansible-runner.service",state="active"}
+          name="mock-dependency.service",state="active"}
         values: '0+0x15'
       - series: >-
           node_systemd_unit_state{host="control.example.invalid",
-          name="grayhaven-ansible-runner.service",state="activating"}
+          name="mock-dependency.service",state="activating"}
         values: '1+0x15'
     alert_rule_test:
       - eval_time: 5m
@@ -30,10 +30,10 @@ tests:
           - exp_labels:
               client: example
               environment: test
-              host: web.example.invalid
+              host: worker.example.invalid
               project: example
-              role: web
+              role: worker
       - eval_time: 5m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts:
           - exp_labels: {}

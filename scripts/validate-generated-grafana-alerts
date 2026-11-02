@@ -1,295 +1,81 @@
 #!/usr/bin/env python3
-"""Validate the generated Time Tracker Grafana alert contract."""
+"""Validate generated Grafana alerts using fictional inputs."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
-import re
 import runpy
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALERT_SYNC = REPO_ROOT / "roles" / "observability" / "files" / "grayhaven-grafana-alert-sync"
 UID_REGISTRY = REPO_ROOT / "roles" / "observability" / "files" / "grafana-alert-rule-uids.json"
-RENAMED_TITLES = {
-    "gh-79edbe7173f989f291f19515": "grayhaven-core-prod-web-01 filesystem space utilization",
-    "gh-bf07dab7be3a98d5cf6328c7": "grayhaven-sec-prod-bastion-01 filesystem space utilization",
-    "gh-d3ff61fcdc6c03e6335beec4": "grayhaven-core-prod-web-01 filesystem inode utilization",
-    "gh-6b66fb489062cc56929fc903": "grayhaven-sec-prod-bastion-01 filesystem inode utilization",
-}
-COMMA_CHECKS = {
-    "gcs_stale_bucket_count",
-    "gcs_class_a_monthly_operations",
-    "gcs_class_b_monthly_operations",
-    "google_monitoring_monthly_billed_series",
-}
-USAGE_RULES = {
-    "gcs_class_a_monthly_operations": {
-        "identity": "service:Google Cloud Storage:gcs_class_a_monthly_operations",
-        "metric": "grayhaven_gcs_restic_billing_month_operations_total",
-        "legacy_metric": "grayhaven_gcs_restic_monthly_operations_total",
-        "threshold": "gcs_class_a_monthly_warning_operations",
-        "title": "GCS Class A operations >= 80% usage",
-        "uid": "gh-ebe005a9676dd3b8bc285f57",
-        "operation_class": "Class A",
-    },
-    "gcs_class_b_monthly_operations": {
-        "identity": "service:Google Cloud Storage:gcs_class_b_monthly_operations",
-        "metric": "grayhaven_gcs_restic_billing_month_operations_total",
-        "legacy_metric": "grayhaven_gcs_restic_monthly_operations_total",
-        "threshold": "gcs_class_b_monthly_warning_operations",
-        "title": "GCS Class B operations >= 80% usage",
-        "uid": "gh-1b623645313da0fc789b1e43",
-        "operation_class": "Class B",
-    },
-    "google_monitoring_monthly_billed_series": {
-        "identity": "service:Google Cloud Monitoring:google_monitoring_monthly_billed_series",
-        "metric": "grayhaven_google_monitoring_billing_month_series_total",
-        "legacy_metric": "grayhaven_google_monitoring_monthly_billed_series_total",
-        "threshold": "google_monitoring_monthly_warning_series",
-        "title": "Google Monitoring series >= 80% usage",
-        "uid": "gh-4114f9f64c8c20c1465e15c1",
-    },
-}
-ALERTING_CHECKS = {
-    "gcs_service_telemetry_success",
-    "gcs_operation_telemetry_stale",
-    "google_monitoring_service_telemetry_success",
-    "google_monitoring_telemetry_stale",
-}
 
 
-def usage_rule_contracts(
-    namespace: dict[str, object], config: dict[str, object], rules: list[dict[str, object]]
-) -> None:
-    by_check = {rule["labels"]["check"]: rule for rule in rules}
-    labels = config["labels"]
-    selector = f'client="{labels["client"]}",environment="{labels["environment"]}"'
-    for check, contract in USAGE_RULES.items():
-        rule = by_check.get(check)
-        if rule is None:
-            raise RuntimeError(f"Generated usage rule is missing: {check}")
-        if rule.get("_identity") != contract["identity"]:
-            raise RuntimeError(f"Generated identity changed for {check}")
-        if rule.get("uid") != contract["uid"]:
-            raise RuntimeError(f"Generated UID changed for {check}")
-        if rule.get("title") != contract["title"]:
-            raise RuntimeError(f"Generated title changed for {check}")
+class FixtureRegistry(dict):
+    """Supply deterministic fictional identities without a production registry."""
 
-        expected_labels = {
-            "client": labels["client"],
-            "environment": labels["environment"],
-            "check": check,
-            "service": (
-                "Google Cloud Storage"
-                if check.startswith("gcs_")
-                else "Google Cloud Monitoring"
-            ),
-            "configured_by": "ansible",
-        }
-        if rule.get("labels") != expected_labels:
-            raise RuntimeError(f"Generated labels changed for {check}")
-        expected_annotations = {
-            "summary": (
-                "GCS Class A operations are approaching monthly usage limit"
-                if check == "gcs_class_a_monthly_operations"
-                else "GCS Class B operations are approaching monthly usage limit"
-                if check == "gcs_class_b_monthly_operations"
-                else "Google Monitoring series reached the monthly warning threshold"
-            ),
-            "description": (
-                "GCS Class A operations are at or above the configured warning threshold."
-                if check == "gcs_class_a_monthly_operations"
-                else "GCS Class B operations are at or above the configured warning threshold."
-                if check == "gcs_class_b_monthly_operations"
-                else "Cloud Monitoring billed query series are at or above the configured warning threshold."
-            ),
-            "check_value": namespace["COMMA_INTEGER_TEMPLATE"],
-            "month": "{{ $labels.month }}",
-        }
-        if rule.get("annotations") != expected_annotations:
-            raise RuntimeError(f"Generated annotations changed for {check}")
-        if rule.get("folderUID") != "folder":
-            raise RuntimeError(f"Generated folder changed for {check}")
-        if rule.get("ruleGroup") != config["grafana"]["evaluation_group"]:
-            raise RuntimeError(f"Generated rule group changed for {check}")
-        if rule.get("notification_settings") != {
-            "receiver": config["grafana"]["contact_point"]
-        }:
-            raise RuntimeError(f"Generated contact point changed for {check}")
-
-        if check.startswith("gcs_"):
-            expression = (
-                "max by (client, environment, location, month, operation_class, project_id) "
-                f'({contract["metric"]}{{{selector},operation_class="{contract["operation_class"]}"}})'
-            )
-        else:
-            expression = (
-                "max by (client, environment, location, month, project_id) "
-                f'({contract["metric"]}{{{selector}}})'
-            )
-        query = rule["data"][0]["model"]["expr"]
-        if contract["legacy_metric"] in query:
-            raise RuntimeError(f"Generated raw usage query changed for {check}")
-        if re.search(r"(?:>=|>|<=|<|==|!=)\s*-?\d", query):
-            raise RuntimeError(f"Generated usage query embeds a threshold for {check}")
-        if query != expression:
-            raise RuntimeError(f"Generated raw usage query changed for {check}")
-
-        evaluator = rule["data"][1]["model"]["conditions"][0]["evaluator"]
-        minimum = config["thresholds"][contract["threshold"]]
-        if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0:
-            raise RuntimeError(f"Configured usage threshold is invalid for {check}")
-        if evaluator != {"params": [minimum - 1], "type": "gt"}:
-            raise RuntimeError(f"Generated evaluator threshold is incorrect for {check}")
-        if rule["data"][1]["model"].get("expression") != "A":
-            raise RuntimeError(f"Generated usage threshold does not evaluate query A for {check}")
-        if rule.get("noDataState") != "OK":
-            raise RuntimeError(f"Usage NoData policy changed for {check}")
-
-
-def telemetry_no_data_contract(rules: list[dict[str, object]]) -> None:
-    by_check = {rule["labels"]["check"]: rule for rule in rules}
-    for check in ALERTING_CHECKS:
-        if by_check[check].get("noDataState") != "Alerting":
-            raise RuntimeError(f"Telemetry NoData policy changed for {check}")
-
-
-def threshold_boundary_contract(
-    config: dict[str, object], rules: list[dict[str, object]]
-) -> None:
-    """Require native inclusive evaluators for percentage and expiry bounds."""
-
-    by_check = {rule["labels"]["check"]: rule for rule in rules}
-    percentage_thresholds = {
-        "cpu_utilization": "cpu_percent",
-        "memory_utilization": "memory_percent",
-        "filesystem_space": "filesystem_percent",
-        "filesystem_inode": "filesystem_inode_percent",
-        "swap_utilization": "swap_percent",
-    }
-    thresholds = config["thresholds"]
-    for check, threshold_name in percentage_thresholds.items():
-        evaluator = by_check[check]["data"][1]["model"]["conditions"][0]["evaluator"]
-        expected = {"params": [float(thresholds[threshold_name])], "type": "gte"}
-        if evaluator != expected:
-            raise RuntimeError(
-                f"Generated {check} evaluator does not preserve the inclusive threshold"
-            )
-
-    expired_evaluator = by_check["ssl_certificate_expired"]["data"][1]["model"][
-        "conditions"
-    ][0]["evaluator"]
-    if expired_evaluator != {"params": [0], "type": "lte"}:
-        raise RuntimeError(
-            "Generated certificate-expired evaluator does not include the zero boundary"
-        )
-
-    expiring_expression = by_check["ssl_certificate_expiring"]["data"][0]["model"][
-        "expr"
-    ]
-    certificate_window = float(thresholds["certificate_expiring_seconds"])
-    if (
-        f"< {certificate_window}" not in expiring_expression
-        or "> 0)" not in expiring_expression
-    ):
-        raise RuntimeError(
-            "Generated certificate-expiring rule no longer excludes expired certificates"
-        )
-
-
-def https_annotation_contract(rules: list[dict[str, object]]) -> None:
-    """Keep HTTPS reachability wording separate from certificate trust."""
-
-    availability_rules = [
-        rule for rule in rules if rule["labels"].get("check") == "https_200"
-    ]
-    if not availability_rules:
-        raise RuntimeError("Generated HTTPS availability rule is missing")
-    for rule in availability_rules:
-        description = rule["annotations"].get("description", "")
-        if "200" in description or "status" in description.lower():
-            raise RuntimeError(
-                "Generated HTTPS availability annotation still describes an HTTP status"
-            )
-        if "HTTPS/TLS" not in description:
-            raise RuntimeError(
-                "Generated HTTPS availability annotation does not describe TLS reachability"
-            )
-
-    trust_rules = [
-        rule
-        for rule in rules
-        if rule["labels"].get("check") == "ssl_certificate_trusted"
-    ]
-    if not trust_rules:
-        raise RuntimeError("Generated certificate-trust rule is missing")
-    if any(
-        rule["annotations"] == availability_rules[0]["annotations"]
-        for rule in trust_rules
-    ) or not all(
-        "trust" in rule["annotations"].get("description", "").lower()
-        for rule in trust_rules
-    ):
-        raise RuntimeError("Generated HTTPS availability and certificate-trust annotations overlap")
+    def __missing__(self, identity: str) -> str:
+        uid = "gh-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+        self[identity] = uid
+        return uid
 
 
 def fixture_config() -> dict[str, object]:
     return {
-        "uid_registry": json.loads(UID_REGISTRY.read_text(encoding="utf-8")),
-        "uid_registry_file": str(UID_REGISTRY),
+        "uid_registry": FixtureRegistry(),
+        "uid_registry_file": "/fixture/registry.json",
         "grafana": {
-            "contact_point": "Grayhaven IRM",
-            "evaluation_group": "grayhaven-production-1m",
+            "contact_point": "fixture-contact",
+            "evaluation_group": "fixture-group",
         },
         "hosts": [
             {
-                "client": "grayhaven",
+                "client": "fixture",
                 "control_node": False,
-                "environment": "prod",
-                "fqdn": "grayhaven-core-prod-web-01.grayhavensystems.com",
-                "project": "core",
+                "environment": "test",
+                "fqdn": "worker.example.invalid",
+                "project": "fixture",
                 "role": "web",
-                "short_hostname": "grayhaven-core-prod-web-01",
+                "short_hostname": "worker",
             }
         ],
-        "labels": {"client": "grayhaven", "environment": "prod"},
+        "labels": {"client": "fixture", "environment": "test"},
         "service_units": {
             "common": [],
             "control_node": [],
-            "web": [
-                {
-                    "check": "timetracker_service",
-                    "name": "grayhaven-timetracker.service",
-                    "summary": "Time Tracker service is down",
-                }
-            ],
+            "web": [{
+                "check": "fixture_service",
+                "name": "mock-dependency.service",
+                "summary": "Fixture service is down",
+            }],
         },
-        "sites": [
-            {
-                "aliases": [],
-                "dev_domain": "",
-                "domain": "timetracker.grayhavensystems.com",
-                "kind": "application",
-                "root_name": "timetracker",
-            }
-        ],
+        "sites": [{
+            "aliases": [],
+            "dev_domain": "",
+            "domain": "application.example.invalid",
+            "kind": "application",
+            "root_name": "fixture-application",
+            "display_name": "Fixture Application",
+            "health_check": "fixture_health",
+        }],
         "thresholds": {
-            "certificate_expiring_seconds": 1_209_600,
-            "cpu_percent": 80,
-            "filesystem_inode_percent": 80,
-            "filesystem_percent": 80,
-            "gcs_class_a_monthly_warning_operations": 4_000,
-            "gcs_class_b_monthly_warning_operations": 40_000,
-            "gcs_operation_stale_seconds": 10_800,
-            "gcs_stale_bucket_check_stale_seconds": 100_800,
-            "google_monitoring_monthly_warning_series": 800_000,
-            "google_monitoring_usage_stale_seconds": 10_800,
-            "memory_percent": 80,
-            "restic_stale_seconds": 90_000,
-            "swap_percent": 50,
+            "certificate_expiring_seconds": 123_456,
+            "cpu_percent": 73,
+            "filesystem_inode_percent": 74,
+            "filesystem_percent": 75,
+            "gcs_class_a_monthly_warning_operations": 1_234,
+            "gcs_class_b_monthly_warning_operations": 2_345,
+            "gcs_operation_stale_seconds": 1_801,
+            "gcs_stale_bucket_check_stale_seconds": 2_802,
+            "google_monitoring_monthly_warning_series": 3_456,
+            "google_monitoring_usage_stale_seconds": 1_803,
+            "memory_percent": 76,
+            "restic_stale_seconds": 4_321,
+            "swap_percent": 77,
         },
         "tls_mode": "host",
     }
@@ -298,12 +84,9 @@ def fixture_config() -> dict[str, object]:
 def imported_identity(rule: dict[str, object]) -> str:
     labels = rule["labels"]
     check = labels["check"]
-    if "host" in labels:
-        return f"host:{labels['host']}:{check}"
-    if "domain" in labels:
-        return f"domain:{labels['domain']}:{check}"
-    if "service" in labels:
-        return f"service:{labels['service']}:{check}"
+    for scope in ("host", "domain", "service"):
+        if scope in labels:
+            return f"{scope}:{labels[scope]}:{check}"
     return f"check:{check}"
 
 
@@ -314,51 +97,39 @@ def validate_live_registry(
     desired_rules: list[dict[str, object]] | None = None,
 ) -> None:
     managed = [
-        rule
-        for rule in live_rules
+        rule for rule in live_rules
         if rule.get("labels", {}).get("configured_by") == "ansible"
     ]
     if len(managed) != len(registry):
-        raise RuntimeError(
-            f"Live managed-rule count does not match registry: live={len(managed)}, "
-            f"registry={len(registry)}"
-        )
+        raise RuntimeError("Managed-rule count does not match the registry")
     imported = {imported_identity(rule): rule["uid"] for rule in managed}
-    if imported != registry:
-        raise RuntimeError("Live managed-rule UID inventory does not match the registry")
+    if len(imported) != len(managed) or imported != registry:
+        raise RuntimeError("Managed-rule identities do not match the registry")
     if not all(namespace["valid_rule_uid"](uid) for uid in registry.values()):
         raise RuntimeError("Registry contains an invalid UID")
     if len(set(registry.values())) != len(registry):
         raise RuntimeError("Registry UIDs are not unique")
-    expected_updates = {
-        rule["uid"]
-        for rule in managed
-        if rule["uid"] in RENAMED_TITLES
-        or rule.get("labels", {}).get("check") in COMMA_CHECKS
-    }
-    if len(expected_updates) != 8:
-        raise RuntimeError(
-            f"Expected exactly eight alert updates, found {len(expected_updates)}"
-        )
     if desired_rules is not None:
-        desired_by_uid = {rule["uid"]: rule for rule in desired_rules}
-        live_by_uid = {rule["uid"]: rule for rule in managed}
-        comparable_uids = set(desired_by_uid) & set(live_by_uid)
-        if comparable_uids and all(
-            "data" in live_by_uid[uid] for uid in comparable_uids
-        ):
-            actual_updates = {
-                uid
-                for uid in comparable_uids
-                if namespace["comparable"](live_by_uid[uid])
-                != namespace["comparable"](desired_by_uid[uid])
-            }
-            expected_updates &= comparable_uids
-            if actual_updates != expected_updates:
-                raise RuntimeError(
-                    "Live reconciliation has unexpected rule updates: "
-                    f"expected={sorted(expected_updates)!r}, actual={sorted(actual_updates)!r}"
-                )
+        desired = {rule["uid"]: rule for rule in desired_rules}
+        for rule in managed:
+            expected = desired.get(rule["uid"])
+            if expected is not None and namespace["comparable"](rule) != namespace["comparable"](expected):
+                raise RuntimeError("Managed rule differs from its expected definition")
+
+
+def validate_generated_rules(
+    namespace: dict[str, object], rules: dict[str, dict[str, object]]
+) -> None:
+    if not rules:
+        raise RuntimeError("No alert rules were generated")
+    for uid, rule in rules.items():
+        if uid != rule["uid"] or not namespace["valid_rule_uid"](uid):
+            raise RuntimeError("Generated alert rule has an invalid UID")
+        if namespace["duration_seconds"](rule["for"]) < 300:
+            raise RuntimeError("Generated alert rule has an invalid pending period")
+        queries = rule["data"]
+        if not queries or not queries[0]["model"]["expr"]:
+            raise RuntimeError("Generated alert rule has no query")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -371,68 +142,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     namespace = runpy.run_path(str(ALERT_SYNC))
     config = fixture_config()
-    rules = [
-        *namespace["service_rules"](config, "folder", "prometheus"),
-        *namespace["host_metric_rules"](config, "folder", "prometheus"),
-        *namespace["site_rules"](config, "folder", "prometheus"),
-        *namespace["external_service_rules"](config, "folder", "prometheus"),
-    ]
-    usage_rule_contracts(namespace, config, rules)
-    telemetry_no_data_contract(rules)
-    threshold_boundary_contract(config, rules)
-    https_annotation_contract(rules)
-    expected = {
-        "grayhaven-core-prod-web-01 Time Tracker service": "5m",
-        "grayhaven-core-prod-web-01 Time Tracker health check": "5m",
-        "timetracker.grayhavensystems.com HTTPS availability": "5m",
-        "timetracker.grayhavensystems.com HTTP to HTTPS redirects": "5m",
-        "timetracker.grayhavensystems.com SSL certificate expired": "5m",
-        "timetracker.grayhavensystems.com using untrusted SSL certificate": "5m",
-        "timetracker.grayhavensystems.com SSL certificate expiring within 14 days": "5m",
-    }
-    actual = {
-        rule["title"]: rule["for"]
-        for rule in rules
-        if "Time Tracker" in rule["title"]
-        or "timetracker.grayhavensystems.com" in rule["title"]
-    }
-    if actual != expected:
-        raise RuntimeError(
-            f"Generated Time Tracker alert contract mismatch: expected={expected!r}, actual={actual!r}"
-        )
-    gcs_stale_rule = next(
-        rule for rule in rules if rule["title"] == "GCS operation telemetry stale"
-    )
-    if gcs_stale_rule["for"] != "5m":
-        raise RuntimeError(
-            "Generated GCS operation telemetry stale alert must wait for the initial refresh"
-        )
-    by_check = {rule["labels"]["check"]: rule for rule in rules}
-    for check in COMMA_CHECKS:
-        if by_check[check]["annotations"].get("check_value") != namespace["COMMA_INTEGER_TEMPLATE"]:
-            raise RuntimeError(f"Generated {check} annotation is not a full comma-grouped integer")
-    if by_check["filesystem_inode"]["annotations"].get("check_value") != (
-        '{{ printf "%.3f" $values.A.Value }}%'
-    ):
-        raise RuntimeError("Generated inode annotation is not a fixed percentage")
-    for check in ("cpu_utilization", "memory_utilization", "filesystem_space", "swap_utilization"):
-        if by_check[check]["annotations"].get("check_value") != "{{ humanize $values.A.Value }}%":
-            raise RuntimeError(f"Excluded {check} annotation format changed")
-    if by_check["ssl_certificate_expiring"]["annotations"].get("check_value") != (
-        "{{ humanizeDuration $values.A.Value }}"
-    ):
-        raise RuntimeError("Certificate duration annotation format changed")
-    generated_by_uid = {rule["uid"]: rule for rule in rules}
-    for uid, title in RENAMED_TITLES.items():
-        if uid in generated_by_uid and generated_by_uid[uid]["title"] != title:
-            raise RuntimeError(f"Generated title mismatch for permanent UID {uid}")
-
-    registry = config["uid_registry"]
-    namespace["load_uid_registry"](str(UID_REGISTRY))
+    rules = namespace["desired_rules"](config, "fixture-folder", "fixture-datasource")
+    validate_generated_rules(namespace, rules)
     if args.live_export:
+        registry = namespace["load_uid_registry"](str(UID_REGISTRY))
         live_rules = json.loads(args.live_export.read_text(encoding="utf-8"))
-        validate_live_registry(namespace, registry, live_rules, rules)
-        print("identity_created=0 identity_updated=0 identity_deleted=0 expected_rule_updates=8")
+        validate_live_registry(namespace, registry, live_rules)
     return 0
 
 

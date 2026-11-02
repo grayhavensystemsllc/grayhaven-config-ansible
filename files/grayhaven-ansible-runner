@@ -900,8 +900,9 @@ prepare_runner_runtime() {
 
 run_convergence() {
   local mcp_vars=()
-  if [[ -f "${VAULT_CHECKOUT_DIR}/vault/mcp.yml" ]]; then
-    mcp_vars+=(--extra-vars "@${VAULT_CHECKOUT_DIR}/vault/mcp.yml")
+  local optional_vars="${1:-${VAULT_CHECKOUT_DIR}/vault/mcp.yml}"
+  if [[ -f "$optional_vars" ]]; then
+    mcp_vars+=(--extra-vars "@$optional_vars")
   fi
   prepare_inventory_known_hosts
 

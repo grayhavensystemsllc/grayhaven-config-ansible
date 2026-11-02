@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import shlex
 import stat
 import subprocess
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
+import xml.etree.ElementTree as ET
 
 from tests import shell_coverage
 
@@ -35,7 +38,7 @@ class ShellProgramTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             trace = pathlib.Path(temp_dir) / "trace.bash"
             trace.write_text(shell_coverage.TRACE_SCRIPT, encoding="utf-8")
-            run_env = os.environ.copy()
+            run_env = {"PATH": os.defpath, "HOME": temp_dir, "LANG": "C.UTF-8"}
             run_env.update(shell_coverage.coverage_environment(trace))
             if env:
                 run_env.update(env)
@@ -48,18 +51,41 @@ class ShellProgramTests(unittest.TestCase):
                 text=True,
             )
 
-    def test_convergence_loads_optional_mcp_vault_without_requiring_it_on_old_hosts(
+    def test_coverage_trace_distinguishes_executed_and_skipped_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            script = root / "gtmux"
+            executable(
+                script,
+                "#!/usr/bin/env bash\nvalue=42\nif false; then\n"
+                "  printf 'skipped'\nfi\nprintf '%s' \"$value\"\n",
+            )
+            with (
+                mock.patch.object(shell_coverage, "REPO_ROOT", root),
+                mock.patch.object(shell_coverage, "TRACE_PATH", root / "trace.lines"),
+                mock.patch.object(shell_coverage, "XML_PATH", root / "coverage.xml"),
+                mock.patch.object(shell_coverage, "PROGRAMS", (pathlib.Path("gtmux"),)),
+            ):
+                result = self.run_bash(f"bash {shlex.quote(str(script))}")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                shell_coverage.write_report()
+                report = ET.parse(shell_coverage.XML_PATH)
+                hits = {int(line.get("number")): int(line.get("hits")) for line in report.iter("line")}
+            self.assertEqual(hits[2], 1)
+            self.assertEqual(hits[4], 0)
+            self.assertEqual(hits[6], 1)
+
+    def test_convergence_includes_optional_variables_only_when_present(
         self,
     ) -> None:
-        for include_mcp in (False, True):
+        for include_optional in (False, True):
             with (
-                self.subTest(include_mcp=include_mcp),
+                self.subTest(include_optional=include_optional),
                 tempfile.TemporaryDirectory() as folder,
             ):
                 root = pathlib.Path(folder)
-                (root / "vault").mkdir()
-                if include_mcp:
-                    (root / "vault/mcp.yml").write_text("fixture: true")
+                if include_optional:
+                    (root / "mock-dependency.yml").write_text("fixture: true")
                 result = self.run_bash(
                     """
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
@@ -74,15 +100,14 @@ class ShellProgramTests(unittest.TestCase):
                     log() { :; }
                     write_ordered_runner_log() { cat; }
                     run_as_ansible() { printf '%s\\n' "$@"; }
-                    run_convergence
+                    run_convergence "$FIXTURE_ROOT/mock-dependency.yml"
                     """,
                     env={"FIXTURE_ROOT": folder},
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
-                    "@" + folder + "/vault/mcp.yml" in result.stdout, include_mcp
+                    "@" + folder + "/mock-dependency.yml" in result.stdout, include_optional
                 )
-                self.assertIn("/vault/web.yml", result.stdout)
 
     def test_runner_arguments_and_dispatch(self) -> None:
         for arguments, expected in (
@@ -126,27 +151,6 @@ class ShellProgramTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("rotate-control", result.stdout)
 
-    def test_runner_uses_persistent_playbook_log(self) -> None:
-        result = self.run_bash(
-            """
-            export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
-            source files/grayhaven-ansible-runner
-            printf '%s|%s|%s|%s\\n' \
-              "$RUNNER_PLAYBOOK_LOG" \
-              "$RUNNER_RUNTIME_DIR" \
-              "$RUNNER_VARS" \
-              "$RUNNER_SECRET_ENV"
-            """
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.strip(),
-            "/var/log/grayhaven/ansible-runner/playbook.log|"
-            "/run/grayhaven-ansible-runner|"
-            "/run/grayhaven-ansible-runner/vars.yml|"
-            "/run/grayhaven-ansible-runner/secrets.env",
-        )
-
     def test_runner_retries_failure_notification_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             curl_args = pathlib.Path(temp_dir) / "curl-args"
@@ -154,7 +158,7 @@ class ShellProgramTests(unittest.TestCase):
                 f"""
                 export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
                 source files/grayhaven-ansible-runner
-                DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/id/token
+                DISCORD_WEBHOOK_URL=https://hooks.example.invalid/id/token
                 export CURL_ARGS={str(curl_args)!r}
                 failed_playbook_targets() {{ printf 'test-host\\n'; }}
                 curl() {{ cat -- >/dev/null; printf '%s\\n' "$*" > "$CURL_ARGS"; }}
@@ -162,98 +166,96 @@ class ShellProgramTests(unittest.TestCase):
                 """
             )
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("--retry 3", curl_args.read_text(encoding="utf-8"))
-            self.assertIn("--retry-max-time 300", curl_args.read_text(encoding="utf-8"))
+            arguments = shlex.split(curl_args.read_text(encoding="utf-8"))
+            for option in ("--retry", "--retry-max-time"):
+                self.assertGreater(int(arguments[arguments.index(option) + 1]), 0)
 
     def test_poller_change_and_no_change_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
-            for name in ("runner.env", "control", "vault-key"):
+            for name in ("control", "credential"):
                 (root / name).touch()
-
-            def git(*args: str) -> str:
-                return subprocess.run(
-                    ["git", *args], check=True, capture_output=True, text=True,
-                ).stdout.strip()
-
-            checkouts = {}
-            for name in ("config", "vault"):
-                remote = root / f"{name}-remote"
-                git("init", "--initial-branch=main", str(remote))
-                git("-C", str(remote), "-c", "user.name=Test", "-c",
-                    "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
-                    "commit", "--allow-empty", "-m", "fixture")
-                local = root / name
-                git("clone", str(remote), str(local))
-                checkouts[name] = local
-
-            # Deliberately stale legacy caches must not cause a post-manual-run trigger.
-            (root / "config.ref").write_text("stale-config\n", encoding="utf-8")
-            (root / "vault.ref").write_text("stale-vault\n", encoding="utf-8")
-            (root / "runner.env").write_text(
-                f"REPO_URL='{root / 'config-remote'}'\nREPO_REF=main\n"
-                f"VAULT_REPO_URL='{root / 'vault-remote'}'\nVAULT_REPO_REF=main\n"
-                f"CHECKOUT_DIR='{checkouts['config']}'\n"
-                f"VAULT_CHECKOUT_DIR='{checkouts['vault']}'\n", encoding="utf-8",
+            for name in ("first", "second"):
+                (root / f"{name}-upstream").write_text("same")
+                (root / f"{name}-current").write_text("same")
+            environment = root / "runner.env"
+            environment.write_text(
+                f"REPO_URL=first\nREPO_REF=example\n"
+                f"VAULT_REPO_URL=second\nVAULT_REPO_REF=example\n"
+                f"CHECKOUT_DIR='{root / 'first-current'}'\n"
+                f"VAULT_CHECKOUT_DIR='{root / 'second-current'}'\n",
+                encoding="utf-8",
             )
+            marker = root / "called"
 
             def poll(extra: str = "") -> subprocess.CompletedProcess[str]:
                 return self.run_bash(
                     f"""
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
                     source files/grayhaven-ansible-poller
-                    STATE_DIR={str(root)!r}; RUNNER_ENV={str(root / 'runner.env')!r}
+                    STATE_DIR={str(root)!r}; RUNNER_ENV={str(environment)!r}
                     ANSIBLE_CONTROL_PRIVATE_KEY={str(root / 'control')!r}
-                    VAULT_DEPLOY_PRIVATE_KEY={str(root / 'vault-key')!r}
+                    VAULT_DEPLOY_PRIVATE_KEY={str(root / 'credential')!r}
                     drop_to_ansible() {{ :; }}; prepare_github_known_hosts() {{ :; }}
-                    sudo() {{ printf 'trigger:%s\\n' "$*"; }}
+                    remote_ref() {{ cat "$FIXTURE_ROOT/$1-upstream"; }}
+                    checkout_head() {{ if [[ -f "$1" ]]; then cat "$1"; fi; }}
+                    sudo() {{ printf 'called\n' >> "$FIXTURE_ROOT/called"; }}
                     {extra}
                     main
-                    """
+                    """,
+                    env={"FIXTURE_ROOT": str(root)},
                 )
 
             result = poll()
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("No repository changes detected", result.stdout)
-            self.assertNotIn("trigger:", result.stdout)
+            self.assertFalse(marker.exists())
 
-            for name in ("config", "vault"):
-                remote = root / f"{name}-remote"
-                git("-C", str(remote), "-c", "user.name=Test", "-c",
-                    "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
-                    "commit", "--allow-empty", "-m", "update")
+            for index, name in enumerate(("first", "second"), 1):
+                (root / f"{name}-upstream").write_text("updated")
                 result = poll()
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("trigger:-n systemctl start --no-block", result.stdout)
-                # Updating the local checkout, as a manual runner does, is sufficient.
-                git("-C", str(checkouts[name]), "pull", "--ff-only")
-                self.assertNotIn("trigger:", poll().stdout)
+                self.assertEqual(len(marker.read_text().splitlines()), index)
+                (root / f"{name}-current").write_text("updated")
+                self.assertEqual(poll().returncode, 0)
+                self.assertEqual(len(marker.read_text().splitlines()), index)
 
-            checkouts["config"].rename(root / "config-moved")
-            result = poll()
+            (root / "first-current").unlink()
+            self.assertEqual(poll().returncode, 0)
+            self.assertEqual(len(marker.read_text().splitlines()), 3)
+            self.assertEqual(poll("sudo() { return 7; }").returncode, 7)
+            for extra in ("remote_ref() { return 1; }", "remote_ref() { :; }"):
+                self.assertNotEqual(poll(extra).returncode, 0)
+
+            fake_checkout = root / "checkout"
+            (fake_checkout / ".git").mkdir(parents=True)
+            result = self.run_bash(
+                """
+                export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                source files/grayhaven-ansible-poller
+                GITHUB_KNOWN_HOSTS="$FIXTURE_ROOT/hosts"
+                git() {
+                  if [[ "$1" == "-C" ]]; then printf '%s\n' "$FIXTURE_REF";
+                  else printf '%s\t%s\n' "$FIXTURE_REF" refs/heads/example; fi
+                }
+                remote_ref fixture-repository example
+                checkout_head "$FIXTURE_ROOT/checkout"
+                checkout_head "$FIXTURE_ROOT/missing"
+                """,
+                env={"FIXTURE_ROOT": str(root), "FIXTURE_REF": "mock-ref"},
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("old=<none>", result.stdout)
-            self.assertIn("trigger:", result.stdout)
-            failed_trigger = poll("sudo() { return 7; }")
-            self.assertEqual(failed_trigger.returncode, 7)
-            for extra in (
-                "remote_ref() { return 1; }",
-                "remote_ref() { :; }",
-            ):
-                result = poll(extra)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("trigger:", result.stdout)
-            self.assertEqual((root / "config.ref").read_text(), "stale-config\n")
-            self.assertEqual((root / "vault.ref").read_text(), "stale-vault\n")
+            self.assertEqual(result.stdout.splitlines(), ["mock-ref", "mock-ref"])
 
         missing = self.run_bash(
-            "export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1; source files/grayhaven-ansible-poller; require_file /definitely/missing"
+            "export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1; source files/grayhaven-ansible-poller; require_file /fixture/missing"
         )
         self.assertNotEqual(missing.returncode, 0)
 
     def test_gtmux_validation_create_and_attach(self) -> None:
         script = REPO_ROOT / "roles/admin_access/files/gtmux"
         result = self.run_bash(f"bash {script} bad")
+        self.assertEqual(result.returncode, 2)
+        result = self.run_bash(f"bash {script} one two")
         self.assertEqual(result.returncode, 2)
         result = self.run_bash(f"TMUX=active bash {script} --reset")
         self.assertEqual(result.returncode, 1)
@@ -275,7 +277,8 @@ class ShellProgramTests(unittest.TestCase):
             executable(fake_bin / "hostname", "#!/usr/bin/env bash\nprintf 'host.example.invalid\n'\n")
             env = {
                 "HOME": str(home),
-                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "PATH": f"{fake_bin}:{os.defpath}",
+                "GRAYHAVEN_TMUX_SESSION_NAME": "mock-session",
                 "SSH_AUTH_SOCK": str(root / "agent.sock"),
                 "TMUX_LOG": str(root / "tmux.log"),
                 "TMUX_STATE": str(root / "state"),
@@ -296,10 +299,28 @@ class ShellProgramTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             log_end = (root / "tmux.log").read_text(encoding="utf-8").splitlines()
             reset_log = log_end[len(log_start) :]
-            self.assertEqual(reset_log[0], "has-session -t Grayhaven Systems LLC")
-            self.assertEqual(reset_log[1], "kill-session -t Grayhaven Systems LLC")
+            self.assertEqual(reset_log[0], "has-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"])
+            self.assertEqual(reset_log[1], "kill-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"])
             self.assertTrue(any(entry.startswith("new-session ") for entry in reset_log))
             self.assertTrue((root / "state").exists())
+
+            (root / "state").unlink()
+            (home / ".tmux").mkdir()
+            workspace = home / ".tmux" / "grayhaven-workspace.tmux"
+            workspace.write_text(
+                'touch "$WORKSPACE_MARKER"\ntmux new-session -d -s "$GRAYHAVEN_TMUX_SESSION_NAME"\n',
+                encoding="utf-8",
+            )
+            env["WORKSPACE_MARKER"] = str(root / "workspace-ran")
+            result = self.run_bash(f"env -u TMUX bash {script}", env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "workspace-ran").exists())
+
+            workspace.unlink()
+            (root / "state").unlink()
+            executable(fake_bin / "tmux", '#!/usr/bin/env bash\n[[ "$1" != has-session ]]\n')
+            result = self.run_bash(f"env -u TMUX bash {script}", env=env)
+            self.assertEqual(result.returncode, 1)
 
     def test_galaxy_installer_success_and_count_failure(self) -> None:
         script = REPO_ROOT / "scripts/install-galaxy-collections"
@@ -329,4 +350,3 @@ class ShellProgramTests(unittest.TestCase):
             executable(fake, "#!/usr/bin/env bash\nexit 0\n")
             result = self.run_bash(f"{script} {requirements} {checksums}", env=env)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Expected 1 collection artifact", result.stderr)

@@ -17,6 +17,7 @@ from typing import Any
 
 MANAGED_LABEL = "configured_by"
 MANAGED_VALUE = "ansible"
+RUNNER_UNIT = "grayhaven-ansible-runner.service"
 INITIAL_SILENCE_CREATED_BY = "grayhaven-grafana-alert-sync"
 INITIAL_SILENCE_COMMENT = (
     "Initial Grayhaven Systems LLC convergence silence while new hosts "
@@ -351,7 +352,7 @@ def host_selector(host: str) -> str:
     return f'host="{promql_string(host)}"'
 
 
-def runner_state_queries(config: dict[str, Any]) -> tuple[str | None, str, int]:
+def dependency_state_queries(config: dict[str, Any], dependency: str) -> tuple[str | None, str, int]:
     control_hosts = sorted({host["fqdn"] for host in config["hosts"] if host.get("control_node")})
     if not control_hosts:
         return None, "vector(0)", 1
@@ -359,7 +360,7 @@ def runner_state_queries(config: dict[str, Any]) -> tuple[str | None, str, int]:
     selector = (
         "node_systemd_unit_state{"
         f'host=~"{domain_regex(control_hosts)}",'
-        'name="grayhaven-ansible-runner.service",state=~"active|activating"}'
+        f'name="{promql_string(dependency)}",state=~"active|activating"}}'
     )
     # Both state series must be fresh before a previous active sample can suppress CPU.
     fresh = f"(count by (host) (count by (host, state) (last_over_time({selector}[2m]))) == 2)"
@@ -374,7 +375,7 @@ def runner_state_queries(config: dict[str, Any]) -> tuple[str | None, str, int]:
 
 
 def runner_state_metric_rule(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> dict[str, Any]:
-    _, reporting, expected = runner_state_queries(config)
+    _, reporting, expected = dependency_state_queries(config, RUNNER_UNIT)
     return alert_rule(
         identity=service_rule_identity("Ansible", "ansible_runner_state_metric"),
         uid_registry=config["uid_registry"],
@@ -438,7 +439,7 @@ def service_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) 
 def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
     rules = []
     thresholds = config["thresholds"]
-    runner_suppression, _, _ = runner_state_queries(config)
+    runner_suppression, _, _ = dependency_state_queries(config, RUNNER_UNIT)
     for host in config["hosts"]:
         common = {
             "uid_registry": config["uid_registry"],

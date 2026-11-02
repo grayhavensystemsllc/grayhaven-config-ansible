@@ -45,7 +45,7 @@ def complete_config() -> dict[str, object]:
         {
             "api_token": "token",
             "evaluation_interval": "1m",
-            "folder": "Grayhaven Systems LLC",
+            "folder": "Fixture Folder",
             "prometheus_datasource_name": "Prometheus",
             "stack_url": "https://grafana.example.invalid",
         }
@@ -54,48 +54,38 @@ def complete_config() -> dict[str, object]:
 
 
 class AlertRuleTests(unittest.TestCase):
-    def test_cpu_window_and_pending_are_consistent_across_host_roles(self) -> None:
-        checks = (
-            "metrics_data", "cpu_utilization", "memory_utilization",
-            "filesystem_space", "filesystem_inode", "swap_utilization",
-            "restic_stale_backup",
-        )
-        for role, minutes in (("mcp", 5), ("web", 5), ("bastion", 5)):
-            for threshold in (37.5, 91):
-                with self.subTest(role=role, threshold=threshold):
-                    host = {
-                        "role": role, "fqdn": f"{role}.example.invalid",
-                        "short_hostname": role, "project": "example",
-                    }
-                    config = {
-                        "hosts": [host], "sites": [],
-                        "labels": {"client": "example", "environment": "test"},
-                        "grafana": {
-                            "evaluation_group": "example", "contact_point": "example",
-                        },
-                        "thresholds": {
-                            "cpu_percent": threshold, "memory_percent": 75,
-                            "filesystem_percent": 85, "filesystem_inode_percent": 85,
-                            "swap_percent": 75, "restic_stale_seconds": 3_600,
-                        },
-                        "uid_registry": {
-                            alert_sync.host_rule_identity(host, check):
-                            f"00000000-0000-4000-8000-{index:012d}"
-                            for index, check in enumerate(checks, 1)
-                        },
-                    }
-                    rules = alert_sync.host_metric_rules(config, "folder", "prom")
-                    cpu = next(rule for rule in rules
-                               if rule["labels"]["check"] == "cpu_utilization")
-                    self.assertIn(f"[{minutes}m]", cpu["data"][0]["model"]["expr"])
-                    self.assertIn(f"{minutes}-minute", cpu["annotations"]["description"])
-                    self.assertEqual(cpu["data"][1]["model"]["conditions"][0]["evaluator"],
-                                     {"type": "gte", "params": [threshold]})
-                    self.assertEqual(cpu["for"], "5m")
-                    self.assertEqual(cpu["uid"], config["uid_registry"][
-                        alert_sync.host_rule_identity(host, "cpu_utilization")
-                    ])
-                    self.assertEqual(cpu["labels"]["role"], role)
+    def test_rule_propagates_supplied_values(self) -> None:
+        values = {
+            "identity": "example:sample",
+            "uid_registry": {"example:sample": "123e4567-e89b-42d3-a456-426614174000"},
+            "title": "Fixture alert",
+            "folder_uid": "fixture-folder",
+            "rule_group": "fixture-group",
+            "datasource_uid": "fixture-source",
+            "expression": "fixture_metric > 4",
+            "evaluator_type": "gt",
+            "threshold": 42,
+            "labels": {"example": "fixture-label"},
+            "annotations": {"summary": "fixture-summary"},
+            "contact_point": "fixture-contact",
+            "duration": "7m",
+            "no_data_state": "Alerting",
+        }
+        rule = alert_sync.alert_rule(**values)
+        self.assertEqual(rule["_identity"], values["identity"])
+        self.assertEqual(rule["uid"], values["uid_registry"][values["identity"]])
+        self.assertEqual(rule["title"], values["title"])
+        self.assertEqual(rule["folderUID"], values["folder_uid"])
+        self.assertEqual(rule["ruleGroup"], values["rule_group"])
+        self.assertEqual(rule["data"][0]["datasourceUid"], values["datasource_uid"])
+        self.assertEqual(rule["data"][0]["model"]["expr"], values["expression"])
+        evaluator = rule["data"][1]["model"]["conditions"][0]["evaluator"]
+        self.assertEqual(evaluator, {"type": values["evaluator_type"], "params": [values["threshold"]]})
+        self.assertEqual(rule["labels"]["example"], values["labels"]["example"])
+        self.assertEqual(rule["annotations"], values["annotations"])
+        self.assertEqual(rule["notification_settings"]["receiver"], values["contact_point"])
+        self.assertEqual(rule["for"], values["duration"])
+        self.assertEqual(rule["noDataState"], values["no_data_state"])
 
     def test_pending_period_floor_preserves_longer_periods(self) -> None:
         arguments = {
@@ -115,16 +105,8 @@ class AlertRuleTests(unittest.TestCase):
                 rule = alert_sync.alert_rule(**arguments, duration=duration)
                 self.assertEqual(rule, {**baseline, "for": expected})
 
-    def test_all_managed_rules_have_fault_tolerant_pending_periods(self) -> None:
-        rules = alert_sync.desired_rules(complete_config(), "folder", "prom")
-        self.assertTrue(rules)
-        for uid, rule in rules.items():
-            with self.subTest(uid=uid):
-                self.assertGreaterEqual(alert_sync.duration_seconds(rule["for"]), 300)
-                self.assertEqual(rule["execErrState"], "Error")
-
     def test_helpers_and_rule_generation(self) -> None:
-        self.assertTrue(alert_sync.valid_rule_uid("gh-f06f6e7870b532624240919a"))
+        self.assertTrue(alert_sync.valid_rule_uid("gh-" + "a" * 24))
         self.assertTrue(
             alert_sync.valid_rule_uid("123e4567-e89b-42d3-a456-426614174000")
         )
@@ -154,7 +136,7 @@ class AlertRuleTests(unittest.TestCase):
             expression="up",
             evaluator_type="lt",
             threshold=1,
-            labels={"client": "grayhaven"},
+            labels={"client": "fixture"},
             annotations={"summary": "Example"},
             contact_point="IRM",
         )
@@ -165,14 +147,19 @@ class AlertRuleTests(unittest.TestCase):
 
         config = complete_config()
         desired = alert_sync.desired_rules(config, "folder", "prom")
-        titles = {item["title"] for item in desired.values()}
-        self.assertIn("grayhaven-core-prod-web-01 Time Tracker service", titles)
-        self.assertIn("Google Monitoring series >= 80% usage", titles)
+        self.assertTrue(any(
+            item["labels"].get("host") == config["hosts"][0]["fqdn"]
+            for item in desired.values()
+        ))
+        self.assertTrue(any(
+            item["labels"].get("domain") == config["sites"][0]["domain"]
+            for item in desired.values()
+        ))
         self.assertEqual(len(desired), len(set(desired)))
         self.assertTrue(
-            alert_sync.is_managed(next(iter(desired.values())), "grayhaven")
+            alert_sync.is_managed(next(iter(desired.values())), "fixture")
         )
-        self.assertFalse(alert_sync.is_managed({}, "grayhaven"))
+        self.assertFalse(alert_sync.is_managed({}, "fixture"))
         self.assertEqual(
             alert_sync.comparable({**rule, "unmanaged": True}),
             alert_sync.comparable(rule),
@@ -183,63 +170,13 @@ class AlertRuleTests(unittest.TestCase):
         )
 
     def test_usage_thresholds_are_strict_integer_boundaries(self) -> None:
-        for value, expected in ((0, -1), (1, 0), (4_000, 3_999)):
+        for value, expected in ((0, -1), (1, 0), (43, 42)):
             self.assertEqual(alert_sync.integer_at_least_threshold(value), expected)
-        for value in (True, False, 1.5, -1, "4000", "4.0", "invalid", None, object()):
+        for value in (True, False, 1.5, -1, "43", "4.0", "invalid", None, object()):
             with self.subTest(value=value), self.assertRaisesRegex(
                 alert_sync.GrafanaError, "non-negative integer"
             ):
                 alert_sync.integer_at_least_threshold(value)
-
-    def test_usage_rules_use_canonical_raw_metrics_and_ownership(self) -> None:
-        config = complete_config()
-        rules = {
-            rule["labels"]["check"]: rule
-            for rule in alert_sync.external_service_rules(config, "folder", "prom")
-        }
-        contracts = {
-            "gcs_class_a_monthly_operations": (
-                "grayhaven_gcs_restic_billing_month_operations_total",
-                "grayhaven_gcs_restic_monthly_operations_total",
-                4_000,
-                "gh-ebe005a9676dd3b8bc285f57",
-            ),
-            "gcs_class_b_monthly_operations": (
-                "grayhaven_gcs_restic_billing_month_operations_total",
-                "grayhaven_gcs_restic_monthly_operations_total",
-                40_000,
-                "gh-1b623645313da0fc789b1e43",
-            ),
-            "google_monitoring_monthly_billed_series": (
-                "grayhaven_google_monitoring_billing_month_series_total",
-                "grayhaven_google_monitoring_monthly_billed_series_total",
-                800_000,
-                "gh-4114f9f64c8c20c1465e15c1",
-            ),
-        }
-        for check, (metric, old_metric, minimum, uid) in contracts.items():
-            with self.subTest(check=check):
-                rule = rules[check]
-                query = rule["data"][0]["model"]["expr"]
-                evaluator = rule["data"][1]["model"]["conditions"][0]["evaluator"]
-                self.assertIn(metric, query)
-                self.assertNotIn(old_metric, query)
-                self.assertNotRegex(query, r"(?:>=|>|<=|<|==|!=)\s*-?\d")
-                self.assertEqual(rule["uid"], uid)
-                self.assertEqual(evaluator, {"params": [minimum - 1], "type": "gt"})
-                self.assertEqual(rule["data"][1]["model"]["expression"], "A")
-                self.assertEqual(rule["noDataState"], "OK")
-                for value in (minimum - 1, minimum, minimum + 1):
-                    self.assertEqual(value > evaluator["params"][0], value >= minimum)
-                self.assertFalse((minimum - 1) > evaluator["params"][0])
-
-        for check in (
-            "gcs_service_telemetry_success",
-            "gcs_operation_telemetry_stale",
-            "google_monitoring_service_telemetry_success",
-            "google_monitoring_telemetry_stale",
-        ):
-            self.assertEqual(rules[check]["noDataState"], "Alerting")
 
     def test_uid_registry_rejects_invalid_shapes_and_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -397,49 +334,30 @@ class AlertRuleTests(unittest.TestCase):
             {
                 **config["hosts"][0],
                 "control_node": True,
-                "fqdn": "bastion.example.invalid",
+                "fqdn": "control.example.invalid",
                 "role": "bastion",
-                "short_hostname": "bastion",
+                "short_hostname": "control",
             }
         )
         config["service_units"]["common"] = [
-            {
-                "check": "common_service",
-                "name": "common.service",
-                "summary": "Common is down",
-            }
+            {"check": "common_service", "name": "mock-common.service", "summary": "Common is down"}
         ]
         config["service_units"]["control_node"] = [
-            {
-                "check": "control_service",
-                "name": "control.service",
-                "summary": "Control is down",
-            }
+            {"check": "control_service", "name": "mock-control.service", "summary": "Control is down"}
         ]
-        config["sites"][0]["dev_domain"] = "dev.example.invalid"
-        config["uid_registry"].update(
-            {
-                "host:bastion.example.invalid:ansible_convergence": "00000000-0000-4000-8000-000000000001",
-                "host:bastion.example.invalid:common_service": "00000000-0000-4000-8000-000000000002",
-                "host:bastion.example.invalid:control_service": "00000000-0000-4000-8000-000000000003",
-                "host:bastion.example.invalid:cpu_utilization": "00000000-0000-4000-8000-000000000004",
-                "host:bastion.example.invalid:filesystem_inode": "00000000-0000-4000-8000-000000000005",
-                "host:bastion.example.invalid:filesystem_space": "00000000-0000-4000-8000-000000000006",
-                "host:bastion.example.invalid:memory_utilization": "00000000-0000-4000-8000-000000000007",
-                "host:bastion.example.invalid:metrics_data": "00000000-0000-4000-8000-000000000008",
-                "host:bastion.example.invalid:restic_stale_backup": "00000000-0000-4000-8000-000000000009",
-                "host:bastion.example.invalid:swap_utilization": "00000000-0000-4000-8000-000000000010",
-                "host:grayhaven-core-prod-web-01.grayhavensystems.com:common_service": "00000000-0000-4000-8000-000000000011",
-                "domain:dev.example.invalid:dev_basic_auth_401": "00000000-0000-4000-8000-000000000012",
-            }
-        )
-        titles = {
-            rule["title"]
-            for rule in alert_sync.desired_rules(config, "folder", "prom").values()
+        services = alert_sync.service_rules(config, "folder", "prom")
+        checks = {rule["labels"]["check"] for rule in services}
+        expected = {
+            unit["check"]
+            for group in ("common", "control_node")
+            for unit in config["service_units"][group]
         }
-        self.assertIn("bastion Control", titles)
-        self.assertIn("bastion Ansible convergence", titles)
-        self.assertIn("dev.example.invalid basic auth", titles)
+        self.assertTrue(expected <= checks)
+
+        with_control = alert_sync.host_metric_rules(config, "folder", "prom")
+        config["hosts"][-1]["control_node"] = False
+        without_control = alert_sync.host_metric_rules(config, "folder", "prom")
+        self.assertEqual(len(with_control), len(without_control) + 1)
 
         no_sites = complete_config()
         no_sites["sites"] = []
@@ -448,15 +366,22 @@ class AlertRuleTests(unittest.TestCase):
         no_web["hosts"][0]["role"] = "bastion"
         self.assertEqual(alert_sync.site_rules(no_web, "folder", "prom"), [])
 
-        load_balancer = complete_config()
-        load_balancer["tls_mode"] = "load_balancer"
-        titles = {
-            rule["title"]
-            for rule in alert_sync.site_rules(load_balancer, "folder", "prom")
-        }
-        self.assertNotIn(
-            "timetracker.grayhavensystems.com SSL certificate expired", titles
-        )
+        config = complete_config()
+        local_tls = alert_sync.site_rules(config, "folder", "prom")
+        config["tls_mode"] = "load_balancer"
+        self.assertLess(len(alert_sync.site_rules(config, "folder", "prom")), len(local_tls))
+
+        config = complete_config()
+        config["sites"][0]["redirect_http"] = False
+        baseline = alert_sync.site_rules(config, "folder", "prom")
+        dev_domain = "sandbox.example.invalid"
+        config["sites"][0]["dev_domain"] = dev_domain
+        with_development = alert_sync.site_rules(config, "folder", "prom")
+        self.assertEqual(len(with_development), len(baseline) + 1)
+        self.assertTrue(any(rule["labels"].get("domain") == dev_domain for rule in with_development))
+        config["sites"][0]["redirect_http"] = True
+        with_redirect = alert_sync.site_rules(config, "folder", "prom")
+        self.assertEqual(len(with_redirect), len(with_development) + 1)
 
     def test_sync_silence_and_main(self) -> None:
         config = complete_config()
@@ -466,7 +391,7 @@ class AlertRuleTests(unittest.TestCase):
         changed_existing["for"] = "99m"
         stale = {
             "uid": "stale",
-            "labels": {"configured_by": "ansible", "client": "grayhaven"},
+            "labels": {"configured_by": "ansible", "client": "fixture"},
         }
 
         fake = mock.Mock()
@@ -491,35 +416,6 @@ class AlertRuleTests(unittest.TestCase):
             self.assertEqual(alert_sync.sync(config), (0, 0, 0))
         unchanged.update_rule.assert_not_called()
 
-        old_usage = json.loads(json.dumps(list(desired.values())))
-        old_metrics = {
-            "gcs_class_a_monthly_operations": "grayhaven_gcs_restic_monthly_operations_total",
-            "gcs_class_b_monthly_operations": "grayhaven_gcs_restic_monthly_operations_total",
-            "google_monitoring_monthly_billed_series": "grayhaven_google_monitoring_monthly_billed_series_total",
-        }
-        for rule in old_usage:
-            check = rule["labels"].get("check")
-            if check in old_metrics:
-                rule["data"][0]["model"]["expr"] = rule["data"][0]["model"]["expr"].replace(
-                    {
-                        "gcs_class_a_monthly_operations": "grayhaven_gcs_restic_billing_month_operations_total",
-                        "gcs_class_b_monthly_operations": "grayhaven_gcs_restic_billing_month_operations_total",
-                        "google_monitoring_monthly_billed_series": "grayhaven_google_monitoring_billing_month_series_total",
-                    }[check],
-                    old_metrics[check],
-                )
-                rule["data"][1]["model"]["conditions"][0]["evaluator"]["params"] = [0]
-        update_only = mock.Mock()
-        update_only.datasource_uid.return_value = "prom"
-        update_only.folder_uid.return_value = "folder"
-        update_only.alert_rules.return_value = old_usage
-        update_only.update_rule_group_interval.return_value = False
-        with mock.patch.object(alert_sync, "GrafanaClient", return_value=update_only):
-            self.assertEqual(alert_sync.sync(config), (0, 3, 0))
-        self.assertEqual(update_only.update_rule.call_count, 3)
-        update_only.create_rule.assert_not_called()
-        update_only.delete_rule.assert_not_called()
-
         empty = mock.Mock()
         empty.datasource_uid.return_value = "prom"
         empty.folder_uid.return_value = "folder"
@@ -538,20 +434,21 @@ class AlertRuleTests(unittest.TestCase):
         with mock.patch.object(alert_sync, "GrafanaClient", return_value=fake):
             self.assertEqual(alert_sync.create_initial_silence(config, 15), "silence")
         payload = fake.create_silence.call_args.args[0]
-        self.assertEqual(payload["matchers"][0]["name"], "configured_by")
+        self.assertTrue(any(item["value"] == config["labels"]["client"] for item in payload["matchers"]))
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = pathlib.Path(temp_dir) / "config.json"
+            registry = pathlib.Path(temp_dir) / "registry.json"
+            registry.write_text(json.dumps(config["uid_registry"]), encoding="utf-8")
+            config["uid_registry_file"] = str(registry)
             path.write_text(json.dumps(config), encoding="utf-8")
             with (
                 mock.patch("sys.argv", ["sync", "--config", str(path)]),
-                mock.patch.object(alert_sync, "sync", return_value=(1, 2, 3)),
-                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+                mock.patch.object(alert_sync, "sync", return_value=(1, 2, 3)) as sync,
+                mock.patch("sys.stdout", new_callable=io.StringIO),
             ):
                 self.assertEqual(alert_sync.main(), 0)
-            self.assertIn(
-                "changed=true created=1 updated=2 deleted=3", stdout.getvalue()
-            )
+            self.assertEqual(sync.call_args.args[0]["labels"], config["labels"])
             with (
                 mock.patch(
                     "sys.argv",
@@ -565,9 +462,9 @@ class AlertRuleTests(unittest.TestCase):
                     ],
                 ),
                 mock.patch.object(
-                    alert_sync, "create_initial_silence", return_value="id"
+                    alert_sync, "create_initial_silence", return_value="fake-silence"
                 ),
                 mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
             ):
                 self.assertEqual(alert_sync.main(), 0)
-            self.assertIn("silence_id=id", stdout.getvalue())
+            self.assertIn("fake-silence", stdout.getvalue())

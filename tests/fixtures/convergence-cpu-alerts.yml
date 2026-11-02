@@ -8,16 +8,16 @@ tests:
   - interval: 1m
     input_series:
       - series: &cpu >-
-          node_cpu_seconds_total{host="web.example.invalid",environment="test",role="web",
+          node_cpu_seconds_total{host="worker.example.invalid",environment="test",role="worker",
           project="example",client="example",mode="idle"}
         values: '0+6x40'
       - series: &active >-
           node_systemd_unit_state{host="control.example.invalid",
-          name="grayhaven-ansible-runner.service",state="active"}
+          name="mock-dependency.service",state="active"}
         values: '0+0x40'
       - series: &activating >-
           node_systemd_unit_state{host="control.example.invalid",
-          name="grayhaven-ansible-runner.service",state="activating"}
+          name="mock-dependency.service",state="activating"}
         values: '0+0x40'
     alert_rule_test:
       - eval_time: 5m
@@ -29,11 +29,11 @@ tests:
           - exp_labels:
               client: example
               environment: test
-              host: web.example.invalid
+              host: worker.example.invalid
               project: example
-              role: web
+              role: worker
       - eval_time: 10m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts: []
 
   # Normal CPU does not fire when convergence is not running.
@@ -50,14 +50,14 @@ tests:
         alertname: CPU
         exp_alerts: []
       - eval_time: 25m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts: []
 
-  # The configured 80% boundary is inclusive.
+  # The supplied threshold is inclusive.
   - interval: 1m
     input_series:
       - series: *cpu
-        values: '0+12x40'
+        values: '0+16.2x40'
       - series: *active
         values: '0+0x40'
       - series: *activating
@@ -71,7 +71,7 @@ tests:
   - interval: 1m
     input_series:
       - series: *cpu
-        values: '0+12.6x40'
+        values: '0+16.8x40'
       - series: *active
         values: '0+0x40'
       - series: *activating
@@ -95,7 +95,7 @@ tests:
         alertname: CPU
         exp_alerts: []
       - eval_time: 25m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts: []
 
   # The active state also suppresses high CPU.
@@ -112,7 +112,7 @@ tests:
         alertname: CPU
         exp_alerts: []
       - eval_time: 25m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts: []
 
   # One missed scrape does not create a missing-metric or CPU alert.
@@ -129,11 +129,11 @@ tests:
         alertname: CPU
         exp_alerts: []
       - eval_time: 15m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts: []
 
   # Suppression lasts at least 15 minutes after convergence. The extra minute
-  # accounts for the runner-state scrape interval.
+  # accounts for the dependency-state scrape interval.
   - interval: 1m
     input_series:
       - series: *cpu
@@ -153,7 +153,7 @@ tests:
         alertname: CPU
         exp_alerts: *cpu_alert
 
-  # If both runner states disappear, CPU evaluation resumes and the metric
+  # If both dependency states disappear, CPU evaluation resumes and the metric
   # alert fires; a previously observed active sample must not keep suppressing.
   - interval: 1m
     input_series:
@@ -171,7 +171,7 @@ tests:
         alertname: CPU
         exp_alerts: *cpu_alert
       - eval_time: 12m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts:
           - exp_labels: {}
 
@@ -189,6 +189,6 @@ tests:
         alertname: CPU
         exp_alerts: *cpu_alert
       - eval_time: 12m
-        alertname: RunnerMetricMissing
+        alertname: DependencyMissing
         exp_alerts:
           - exp_labels: {}
