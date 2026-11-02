@@ -163,9 +163,9 @@ class ValidatorTests(unittest.TestCase):
             template.render.return_value = "fictional rendered output"
             with mock.patch.object(alloy, "build_environment") as build:
                 build.return_value.get_template.return_value = template
-                alloy.render_config(rendered)
+                alloy.render_config(rendered, "mcp")
             self.assertEqual(rendered.read_text(encoding="utf-8"), template.render.return_value)
-            template.render.assert_called_once_with(alloy.fixture_context("web"))
+            template.render.assert_called_once_with(alloy.fixture_context("mcp"))
             rendered.write_text(fake_alloy_content(site), encoding="utf-8")
             alloy.validate_application_contract(rendered, site)
             alloy.validate_https_probe_contract(rendered)
@@ -267,21 +267,28 @@ class ValidatorTests(unittest.TestCase):
         hostname = "login.example.invalid"
         context = timetracker.fixture_context(hostname)
         rendered = fake_application_config(hostname)
-        timetracker.validate(rendered, check_tasks=False)
-        quadlet_name = next(name for name in rendered if name.endswith(".container"))
-        original = rendered[quadlet_name]
-        cases = (
-            original.replace(f"WEBAUTHN_RP_ID={hostname}", "WEBAUTHN_RP_ID=https://example.invalid"),
-            original.replace(f"WEBAUTHN_ORIGIN=https://{hostname}", "WEBAUTHN_ORIGIN=http://other.invalid"),
-            original.replace(f"WEBAUTHN_RP_ID={hostname}", "MISSING_RP_ID"),
-            original + (
-                f'\nPublishPort=0.0.0.0:{context["timetracker_host_port"]}:'
-                f'{context["timetracker_container_port"]}\n'
-            ),
-        )
-        for candidate in cases:
-            with self.subTest(candidate=candidate), self.assertRaises(RuntimeError):
-                timetracker.validate({**rendered, quadlet_name: candidate}, check_tasks=False)
+        fake_tasks = mock.Mock()
+        fake_tasks.read_text.side_effect = AssertionError("unexpected task read")
+        with (
+            mock.patch.object(timetracker, "SERVICE_TASKS", fake_tasks),
+            mock.patch.object(timetracker, "NGINX_TASKS", fake_tasks),
+        ):
+            timetracker.validate(rendered, check_tasks=False)
+            quadlet_name = next(name for name in rendered if name.endswith(".container"))
+            original = rendered[quadlet_name]
+            cases = (
+                original.replace(f"WEBAUTHN_RP_ID={hostname}", "WEBAUTHN_RP_ID=https://example.invalid"),
+                original.replace(f"WEBAUTHN_ORIGIN=https://{hostname}", "WEBAUTHN_ORIGIN=http://other.invalid"),
+                original.replace(f"WEBAUTHN_RP_ID={hostname}", "MISSING_RP_ID"),
+                original + (
+                    f'\nPublishPort=0.0.0.0:{context["timetracker_host_port"]}:'
+                    f'{context["timetracker_container_port"]}\n'
+                ),
+            )
+            for candidate in cases:
+                with self.subTest(candidate=candidate), self.assertRaises(RuntimeError):
+                    timetracker.validate({**rendered, quadlet_name: candidate}, check_tasks=False)
+        fake_tasks.read_text.assert_not_called()
 
     def test_template_renderer_uses_supplied_fictional_hostname(self) -> None:
         hostname = "login.example.invalid"

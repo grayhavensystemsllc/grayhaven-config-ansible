@@ -79,6 +79,8 @@ def render_templates(
 def validate(rendered: dict[str, str], *, check_tasks: bool = True) -> None:
     quadlet = rendered["grayhaven-timetracker.container"]
     nginx = rendered["grayhaven-timetracker.conf"]
+    service_tasks = SERVICE_TASKS.read_text(encoding="utf-8") if check_tasks else ""
+    nginx_tasks = NGINX_TASKS.read_text(encoding="utf-8") if check_tasks else ""
     rp_id_match = re.search(r"^Environment=WEBAUTHN_RP_ID=(.*)$", quadlet, re.MULTILINE)
     origin_match = re.search(r"^Environment=WEBAUTHN_ORIGIN=(.*)$", quadlet, re.MULTILINE)
     if not rp_id_match or not origin_match:
@@ -125,8 +127,6 @@ def validate(rendered: dict[str, str], *, check_tasks: bool = True) -> None:
         raise RuntimeError("Time Tracker container port must remain loopback-only")
     if not check_tasks:
         return
-    service_tasks = SERVICE_TASKS.read_text(encoding="utf-8")
-    nginx_tasks = NGINX_TASKS.read_text(encoding="utf-8")
     required_service_probe = (
         'url: "http://127.0.0.1:{{ timetracker_host_port }}/health"',
         'Host: "{{ timetracker.hostname }}"',
