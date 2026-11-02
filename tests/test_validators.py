@@ -305,3 +305,14 @@ class ValidatorTests(unittest.TestCase):
             self.assertTrue(all(value == hostname for value in rendered.values()))
             for name in rendered:
                 self.assertEqual((pathlib.Path(directory) / name).read_text(), hostname)
+
+    def test_template_validator_rejects_incomplete_fictional_task_input(self) -> None:
+        fake_tasks = mock.Mock()
+        fake_tasks.read_text.return_value = "fictional input with no required fields"
+        with (
+            mock.patch.object(timetracker, "SERVICE_TASKS", fake_tasks),
+            mock.patch.object(timetracker, "NGINX_TASKS", fake_tasks),
+            self.assertRaises(RuntimeError),
+        ):
+            timetracker.validate(fake_application_config("login.example.invalid"))
+        self.assertEqual(fake_tasks.read_text.call_count, 2)
