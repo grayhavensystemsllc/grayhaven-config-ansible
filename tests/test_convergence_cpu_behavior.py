@@ -73,6 +73,8 @@ class ConvergenceCPUBehaviorTests(unittest.TestCase):
         missing_eval = missing["data"][1]["model"]["conditions"][0]["evaluator"]
         self.assertEqual(cpu_eval["type"], "gte")
         self.assertEqual(missing_eval["type"], "lt")
+        self.assertEqual(cpu["noDataState"], "OK")
+        self.assertEqual(missing["noDataState"], "Alerting")
         rules = {
             "groups": [{
                 "name": "test",

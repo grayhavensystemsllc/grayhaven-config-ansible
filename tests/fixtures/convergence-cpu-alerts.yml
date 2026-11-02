@@ -115,6 +115,23 @@ tests:
         alertname: RunnerMetricMissing
         exp_alerts: []
 
+  # One missed scrape does not create a missing-metric or CPU alert.
+  - interval: 1m
+    input_series:
+      - series: *cpu
+        values: '0+6x40'
+      - series: *active
+        values: '0+0x40'
+      - series: *activating
+        values: '1+0x5 stale 1+0x33'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CPU
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: RunnerMetricMissing
+        exp_alerts: []
+
   # Suppression lasts at least 15 minutes after convergence. The extra minute
   # accounts for the runner-state scrape interval.
   - interval: 1m
