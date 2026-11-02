@@ -60,7 +60,7 @@ class AlertRuleTests(unittest.TestCase):
             "filesystem_space", "filesystem_inode", "swap_utilization",
             "restic_stale_backup",
         )
-        for role, minutes in (("mcp", 10), ("web", 5), ("bastion", 5)):
+        for role, minutes in (("mcp", 15), ("web", 5), ("bastion", 5)):
             for threshold in (37.5, 91):
                 with self.subTest(role=role, threshold=threshold):
                     host = {

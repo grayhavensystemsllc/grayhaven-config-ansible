@@ -466,7 +466,7 @@ def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: s
                 )
             )
 
-        cpu_minutes = 10 if host["role"] == "mcp" else 5
+        cpu_minutes = 15 if host["role"] == "mcp" else 5
         rules.append(
             alert_rule(
                 identity=host_rule_identity(host, "cpu_utilization"),
