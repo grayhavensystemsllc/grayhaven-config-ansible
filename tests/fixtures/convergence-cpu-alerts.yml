@@ -115,7 +115,8 @@ tests:
         alertname: RunnerMetricMissing
         exp_alerts: []
 
-  # Suppression lasts 15 minutes after convergence, then CPU can fire again.
+  # Suppression lasts at least 15 minutes after convergence. The extra minute
+  # accounts for the runner-state scrape interval.
   - interval: 1m
     input_series:
       - series: *cpu
@@ -125,13 +126,13 @@ tests:
       - series: *activating
         values: '1 1 1 1 1 1 1 1 1 1 1 0+0x29'
     alert_rule_test:
-      - eval_time: 24m
-        alertname: CPU
-        exp_alerts: []
-      - eval_time: 29m
+      - eval_time: 25m
         alertname: CPU
         exp_alerts: []
       - eval_time: 30m
+        alertname: CPU
+        exp_alerts: []
+      - eval_time: 31m
         alertname: CPU
         exp_alerts: *cpu_alert
 

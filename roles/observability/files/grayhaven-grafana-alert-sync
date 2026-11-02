@@ -364,7 +364,8 @@ def runner_state_queries(config: dict[str, Any]) -> tuple[str | None, str, int]:
     # Both state series must be fresh before a previous active sample can suppress CPU.
     fresh = f"(count by (host) (count by (host, state) (last_over_time({selector}[2m]))) == 2)"
     reporting = f"(count({fresh}) or vector(0))"
-    recent = f"(max by (host) (max_over_time({selector}[15m])) > 0)"
+    # Include the one-minute scrape interval in the 15-minute settling period.
+    recent = f"(max by (host) (max_over_time({selector}[16m])) > 0)"
     suppress = (
         f"(max({recent} and on (host) {fresh}) "
         f"and on () ({reporting} == {len(control_hosts)}))"
