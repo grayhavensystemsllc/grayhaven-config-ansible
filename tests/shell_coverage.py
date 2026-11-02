@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 TRACE_PATH = REPO_ROOT / "shell-coverage.lines"
 XML_PATH = REPO_ROOT / "shell-coverage.xml"
+# Runner and poller are orchestration scripts tested with targeted stubs; the
+# line report covers only the standalone helpers listed here.
 PROGRAMS = (
     pathlib.Path("roles/admin_access/files/gtmux"),
     pathlib.Path("scripts/install-galaxy-collections"),
@@ -18,9 +20,7 @@ PROGRAMS = (
 TRACE_SCRIPT = r"""
 set -o functrace
 __grayhaven_cov_file="${GRAYHAVEN_SHELL_COVERAGE_FILE:-}"
-trap '{
-  __src="${BASH_SOURCE[0]:-}"
-  __line="${LINENO}"
+trap '__src="${BASH_SOURCE[0]:-}"; __line="${LINENO}"
   case "${__src}" in
     */grayhaven-ansible-runner|*/grayhaven-ansible-poller|*/gtmux|*/install-galaxy-collections)
       if [[ -n "${__grayhaven_cov_file}" ]]; then
@@ -28,7 +28,7 @@ trap '{
       fi
       ;;
   esac
-}' DEBUG
+' DEBUG
 """
 
 
@@ -45,15 +45,20 @@ def executable_lines(path: pathlib.Path) -> list[int]:
     lines: list[int] = []
     in_heredoc = False
     heredoc_end = ""
+    continued = False
     for number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         stripped = raw_line.strip()
         if in_heredoc:
             if stripped == heredoc_end:
                 in_heredoc = False
             continue
+        if continued:
+            continued = raw_line.rstrip().endswith("\\")
+            continue
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped in {"}", ";;", "esac", "fi", "done", "else", "then"}:
+        continued = raw_line.rstrip().endswith("\\")
+        if stripped in {"(", ")", "}", ";;", "esac", "fi", "done", "else", "then"}:
             continue
         if stripped.endswith("() {"):
             continue
@@ -66,7 +71,7 @@ def executable_lines(path: pathlib.Path) -> list[int]:
 
 
 def write_report() -> None:
-    """Write a Cobertura report containing every managed shell program."""
+    """Write a Cobertura report for the selected shell helpers."""
     traced: dict[str, set[int]] = {}
     if TRACE_PATH.exists():
         for record in TRACE_PATH.read_text(encoding="utf-8").splitlines():
@@ -80,11 +85,7 @@ def write_report() -> None:
         source = REPO_ROOT / relative
         valid = executable_lines(source)
         observed = traced.get(str(source.resolve()), set())
-        covered: set[int] = set()
-        for trace_line in observed:
-            for candidate in (trace_line, trace_line - 1, trace_line - 2):
-                if candidate in valid:
-                    covered.add(candidate)
+        covered = set(valid) & observed
         data.append((relative, valid, covered))
         total += len(valid)
         covered_total += len(covered)

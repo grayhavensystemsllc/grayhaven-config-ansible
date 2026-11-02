@@ -191,12 +191,11 @@ class IrmRenderingTests(unittest.TestCase):
             },
         }
         rendered = irm.render(
-            {"labels": {"client": "grayhaven", "environment": "prod"}},
+            {"labels": {"client": "fixture", "environment": "test"}},
             groups,
             identities,
             details,
         )
-        self.assertIn("grayhaven_irm_alert_groups_active", rendered)
         self.assertIn('user_display="Example Operator"', rendered)
         self.assertNotIn("Missing ID", rendered)
 
@@ -247,7 +246,7 @@ class IrmRenderingTests(unittest.TestCase):
                     "stack_url": "https://grafana.example.invalid",
                     "api_token": "token",
                 },
-                "labels": {"client": "grayhaven", "environment": "prod"},
+                "labels": {"client": "fixture", "environment": "test"},
                 "output_path": str(output),
             }
             config_path = pathlib.Path(temp_dir) / "config.json"

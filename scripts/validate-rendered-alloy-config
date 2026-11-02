@@ -38,10 +38,10 @@ def build_environment() -> jinja2.Environment:
 def fixture_context(role: str = "web") -> dict[str, object]:
     context = {
         "grayhaven_role": "web",
-        "inventory_hostname": "grayhaven-core-prod-web-01.grayhavensystems.com",
-        "baseline_validation_environment": "prod",
-        "observability_alloy_token_file": "/etc/grayhaven/observability/grafana-alloy-token",
-        "observability_client": "grayhaven",
+        "inventory_hostname": "worker.example.invalid",
+        "baseline_validation_environment": "test",
+        "observability_alloy_token_file": "/fixture/token",
+        "observability_client": "fixture",
         "observability_grafana_credentials": {
             "loki": {
                 "push_url": "https://logs.example.invalid/loki/api/v1/push",
@@ -53,15 +53,15 @@ def fixture_context(role: str = "web") -> dict[str, object]:
             },
         },
         "observability_logs_enabled": True,
-        "observability_project": "core",
+        "observability_project": "fixture",
         "observability_role": "web",
-        "observability_short_hostname": "grayhaven-core-prod-web-01",
-        "observability_textfile_dir": "/var/lib/grayhaven/observability/textfile",
+        "observability_short_hostname": "worker",
+        "observability_textfile_dir": "/fixture/textfile",
         "observability_web_sites": [
             {
-                "aliases": ["www.grayhavensystems.com"],
-                "dev_domain": "dev.grayhavensystems.com",
-                "domain": "grayhavensystems.com",
+                "aliases": ["www.business.example.invalid"],
+                "dev_domain": "dev.business.example.invalid",
+                "domain": "business.example.invalid",
                 "kind": "website",
                 "nginx_log_names": [
                     "prod.access",
@@ -69,12 +69,12 @@ def fixture_context(role: str = "web") -> dict[str, object]:
                     "dev.access",
                     "dev.error",
                 ],
-                "root_name": "grayhavensystems.com",
+                "root_name": "business.example.invalid",
             },
             {
-                "aliases": ["www.jerry-smith.net"],
-                "dev_domain": "dev.jerry-smith.net",
-                "domain": "jerry-smith.net",
+                "aliases": ["www.personal.example.invalid"],
+                "dev_domain": "dev.personal.example.invalid",
+                "domain": "personal.example.invalid",
                 "kind": "website",
                 "nginx_log_names": [
                     "prod.access",
@@ -82,26 +82,28 @@ def fixture_context(role: str = "web") -> dict[str, object]:
                     "dev.access",
                     "dev.error",
                 ],
-                "root_name": "jerry-smith.net",
+                "root_name": "personal.example.invalid",
             },
             {
                 "aliases": [],
                 "dev_domain": "",
-                "domain": "timetracker.grayhavensystems.com",
+                "domain": "app.example.invalid",
                 "kind": "application",
                 "nginx_log_names": ["access", "error"],
-                "root_name": "timetracker",
+                "root_name": "fixture-app",
+                "health_url": "http://127.0.0.1:3417/ready",
+                "health_check": "fixture_health",
             },
         ],
     }
 
     if role == "mcp":
-        context.update(grayhaven_role="mcp", observability_role="mcp", inventory_hostname="grayhaven-core-prod-mcp-01.grayhavensystems.com",
-                       observability_short_hostname="grayhaven-core-prod-mcp-01")
+        context.update(grayhaven_role="mcp", observability_role="mcp", inventory_hostname="service.example.invalid",
+                       observability_short_hostname="service")
         context["observability_web_sites"].append({
-            "root_name":"mcp", "kind":"application", "role":"mcp", "domain":"mcp.grayhavensystems.com",
+            "root_name":"fixture-service", "kind":"application", "role":"mcp", "domain":"service.example.invalid",
             "aliases":[], "dev_domain":"", "nginx_log_names":["access", "error"], "redirect_http":False,
-            "health_url":"http://127.0.0.1:8787/healthz", "health_check":"mcp_health",
+            "health_url":"http://127.0.0.1:3418/ready", "health_check":"fixture_service_health",
         })
     return context
 
@@ -111,20 +113,19 @@ def render_config(output_path: pathlib.Path, role: str = "web") -> None:
     output_path.write_text(template.render(fixture_context(role)), encoding="utf-8")
 
 
-def validate_timetracker_contract(rendered_path: pathlib.Path) -> None:
+def validate_application_contract(rendered_path: pathlib.Path, site: dict[str, object]) -> None:
     rendered = rendered_path.read_text(encoding="utf-8")
+    site_id = regex_replace(site["root_name"], r"[^A-Za-z0-9_]", "_")
     required = (
-        'timetracker_health:',
-        'Host: "timetracker.grayhavensystems.com"',
-        'address = "http://127.0.0.1:8000/health"',
-        'module  = "timetracker_health"',
-        'check       = "timetracker_health"',
-        'selector = `{systemd_unit="grayhaven-timetracker.service"}`',
-        'expression = `.*"level":"(?:debug|info|warning)".*`',
+        f'{site_id}_health:',
+        f'Host: "{site["domain"]}"',
+        f'address = "{site["health_url"]}"',
+        f'module  = "{site_id}_health"',
+        f'check       = "{site["health_check"]}"',
     )
     missing = [value for value in required if value not in rendered]
     if missing:
-        raise RuntimeError(f"Rendered Alloy Time Tracker contract is missing: {missing}")
+        raise RuntimeError(f"Rendered Alloy application contract is missing: {missing}")
 
 
 def validate_https_probe_contract(rendered_path: pathlib.Path) -> None:
@@ -196,7 +197,8 @@ def main() -> int:
         rendered_path.parent.mkdir(parents=True, exist_ok=True)
         render_config(rendered_path, args.role)
         if args.role == "web":
-            validate_timetracker_contract(rendered_path)
+            site = next(site for site in fixture_context()["observability_web_sites"] if site["kind"] == "application")
+            validate_application_contract(rendered_path, site)
         validate_https_probe_contract(rendered_path)
         try:
             result = subprocess.run(["alloy", "validate", str(rendered_path)], check=False)

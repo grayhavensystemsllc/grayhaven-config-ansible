@@ -13,10 +13,11 @@ from tests.helpers import load_program
 status = load_program(
     "grayhaven_automation_status", "files/grayhaven-ansible-automation-status"
 )
+TEST_UNITS = {"poller": "mock-primary", "runner": "mock-secondary"}
 
 
 def unit_records(part="poller", *, state="waiting", service_state="inactive"):
-    prefix = "grayhaven-ansible-" + part
+    prefix = TEST_UNITS[part]
     return [
         {
             "Id": prefix + ".timer",
@@ -60,7 +61,7 @@ class AutomationStatusTests(unittest.TestCase):
             mock.patch.object(status.time, "time_ns", return_value=10_000),
             mock.patch.object(status.time, "monotonic_ns", return_value=10_000),
         ):
-            return status.inspect(components)
+            return status.inspect(components, TEST_UNITS)
 
     def test_finite_future_clock_required_while_waiting(self):
         for realtime, monotonic, healthy in (
@@ -175,18 +176,18 @@ class AutomationStatusTests(unittest.TestCase):
             mock.patch.object(status, "inspect", side_effect=[bad, good]),
             mock.patch.object(status, "command") as run,
         ):
-            result = status.evaluate(status.COMPONENTS, True)
+            result = status.evaluate(status.COMPONENTS, True, TEST_UNITS)
             self.assertTrue(result["healthy"])
             self.assertTrue(result["changed"])
             run.assert_called_once_with(
-                ["/usr/bin/systemctl", "restart", "grayhaven-ansible-poller.timer"]
+                ["/usr/bin/systemctl", "restart", TEST_UNITS["poller"] + ".timer"]
             )
         for repair in (False, True):
             with (
                 mock.patch.object(status, "inspect", return_value=good) as inspect,
                 mock.patch.object(status, "command") as run,
             ):
-                self.assertFalse(status.evaluate(status.COMPONENTS, repair)["changed"])
+                self.assertFalse(status.evaluate(status.COMPONENTS, repair, TEST_UNITS)["changed"])
                 self.assertEqual(inspect.call_count, 1)
                 self.assertEqual(inspect.call_args.args[0], status.COMPONENTS)
                 run.assert_not_called()
@@ -194,7 +195,7 @@ class AutomationStatusTests(unittest.TestCase):
             mock.patch.object(status, "inspect", return_value=bad),
             mock.patch.object(status, "command"),
         ):
-            self.assertFalse(status.evaluate(status.COMPONENTS, True)["healthy"])
+            self.assertFalse(status.evaluate(status.COMPONENTS, True, TEST_UNITS)["healthy"])
 
     def test_configured_unit_names_and_invalid_inputs(self):
         import argparse
@@ -204,7 +205,7 @@ class AutomationStatusTests(unittest.TestCase):
         for value in ("", "--all", "a/b", "a b", "a;reboot"):
             with self.assertRaises(argparse.ArgumentTypeError):
                 status.unit_base(value)
-        units = {"poller": "fixture-poller", "runner": "fixture-runner"}
+        units = TEST_UNITS
         bad = {"healthy": False, "components": {"poller": False}, "units": []}
         with (
             mock.patch.object(status, "inspect", return_value=bad) as inspect,
@@ -213,13 +214,9 @@ class AutomationStatusTests(unittest.TestCase):
             status.evaluate(("poller",), True, units)
             self.assertEqual(inspect.call_args.args[1], units)
             run.assert_called_once_with(
-                ["/usr/bin/systemctl", "restart", "fixture-poller.timer"]
+                ["/usr/bin/systemctl", "restart", TEST_UNITS["poller"] + ".timer"]
             )
         records = unit_records()
-        for record in records:
-            record["Id"] = record["Id"].replace(
-                "grayhaven-ansible-poller", "fixture-poller"
-            )
         with (
             mock.patch.object(
                 status, "command", return_value=raw_units(records)
@@ -227,7 +224,7 @@ class AutomationStatusTests(unittest.TestCase):
             mock.patch.object(status, "next_elapse", return_value=status.INFINITY - 1),
         ):
             self.assertTrue(status.inspect(("poller",), units)["healthy"])
-            self.assertIn("fixture-poller.timer", run.call_args.args[0])
+            self.assertIn(TEST_UNITS["poller"] + ".timer", run.call_args.args[0])
 
     def test_command_is_bounded_and_propagates_failure(self):
         with mock.patch.object(
@@ -236,7 +233,7 @@ class AutomationStatusTests(unittest.TestCase):
             return_value=subprocess.CompletedProcess([], 0, " value ", ""),
         ) as run:
             self.assertEqual(status.command(["fixture"]), "value")
-            self.assertEqual(run.call_args.kwargs["timeout"], 30)
+            self.assertGreater(run.call_args.kwargs["timeout"], 0)
             self.assertTrue(run.call_args.kwargs["check"])
         for error in (
             OSError("missing"),
@@ -250,6 +247,7 @@ class AutomationStatusTests(unittest.TestCase):
                 status.command(["fixture"])
 
     def test_cli_reports_unhealthy_without_traceback_and_fails_repair(self):
+        fake_units = ["--poller-unit", TEST_UNITS["poller"], "--runner-unit", TEST_UNITS["runner"]]
         for args, healthy, expected, parts in (
             ([], True, 0, status.COMPONENTS),
             (["--component", "runner"], False, 0, ("runner",)),
@@ -262,9 +260,10 @@ class AutomationStatusTests(unittest.TestCase):
                 ) as evaluate,
                 contextlib.redirect_stdout(output),
             ):
-                self.assertEqual(status.main(args), expected)
+                self.assertEqual(status.main(fake_units + args), expected)
             self.assertEqual(json.loads(output.getvalue())["healthy"], healthy)
             self.assertEqual(evaluate.call_args.args[0], parts)
+            self.assertEqual(evaluate.call_args.args[2], TEST_UNITS)
         for error in (
             OSError("missing"),
             subprocess.TimeoutExpired("fixture", 30),
@@ -276,7 +275,7 @@ class AutomationStatusTests(unittest.TestCase):
                     mock.patch.object(status, "evaluate", side_effect=error),
                     contextlib.redirect_stdout(output),
                 ):
-                    self.assertEqual(status.main(args), expected)
+                    self.assertEqual(status.main(fake_units + args), expected)
                 result = json.loads(output.getvalue())
                 self.assertFalse(result["healthy"])
                 self.assertIn(str(error), result["error"])

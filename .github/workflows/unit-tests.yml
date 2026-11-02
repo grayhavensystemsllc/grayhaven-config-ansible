@@ -33,6 +33,18 @@ jobs:
           python -m pip install --require-hashes --requirement pip3_requirements.txt
           python -m pip install --requirement requirements-dev.txt
 
+      - name: Install Prometheus rule test tool
+        run: |
+          release_url="https://github.com/prometheus/prometheus/releases/download/v3.15.1"
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$RUNNER_TEMP/prometheus.tar.gz" \
+            "$release_url/prometheus-3.15.1.linux-amd64.tar.gz"
+          checksum='6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84'
+          echo "$checksum  $RUNNER_TEMP/prometheus.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/prometheus.tar.gz" --strip-components=1 \
+            -C "$RUNNER_TEMP" prometheus-3.15.1.linux-amd64/promtool
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
       - name: Run Ruff
         run: python -m ruff check files roles scripts tests
 

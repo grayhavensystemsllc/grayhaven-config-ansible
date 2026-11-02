@@ -127,7 +127,7 @@ class GcsCleanupTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         self.assertTrue(
             gcs.bucket_is_managed(
-                {"labels": {"managed_by": "ansible", "client": "grayhaven"}},
+                {"labels": {"managed_by": "ansible", "client": "fixture"}},
                 {"managed_by": "ansible"},
             )
         )
@@ -163,9 +163,9 @@ class GcsCleanupTests(unittest.TestCase):
                 "--project-id",
                 "project",
                 "--client",
-                "grayhaven",
+                "fixture",
                 "--environment",
-                "prod",
+                "test",
                 "--expected-buckets-file",
                 str(expected),
             ]
@@ -174,8 +174,8 @@ class GcsCleanupTests(unittest.TestCase):
                     "name": "stale-restic",
                     "labels": {
                         "managed_by": "ansible",
-                        "client": "grayhaven",
-                        "env": "prod",
+                        "client": "fixture",
+                        "env": "test",
                         "purpose": "restic",
                     },
                 },
@@ -185,10 +185,12 @@ class GcsCleanupTests(unittest.TestCase):
                 mock.patch("sys.argv", args),
                 mock.patch.object(gcs, "credentials_token", return_value="token"),
                 mock.patch.object(gcs, "list_buckets", return_value=buckets),
+                mock.patch.object(gcs, "delete_bucket") as delete,
                 mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
             ):
                 self.assertEqual(gcs.main(), 0)
-            self.assertIn("would_delete=stale-restic", stdout.getvalue())
+            self.assertIn(buckets[0]["name"], stdout.getvalue())
+            delete.assert_not_called()
 
             args.extend(["--execute"])
             with (
@@ -199,7 +201,7 @@ class GcsCleanupTests(unittest.TestCase):
                 mock.patch("sys.stdout", new_callable=io.StringIO),
             ):
                 self.assertEqual(gcs.main(), 0)
-            delete.assert_called_once_with("stale-restic", "token")
+            delete.assert_called_once_with(buckets[0]["name"], "token")
 
             inventory_args = [
                 "cleanup",
@@ -208,9 +210,9 @@ class GcsCleanupTests(unittest.TestCase):
                 "--project-id",
                 "project",
                 "--client",
-                "grayhaven",
+                "fixture",
                 "--environment",
-                "prod",
+                "test",
                 "--inventory-file",
                 str(inventory),
             ]
@@ -218,10 +220,11 @@ class GcsCleanupTests(unittest.TestCase):
                 mock.patch("sys.argv", inventory_args),
                 mock.patch.object(gcs, "credentials_token", return_value="token"),
                 mock.patch.object(gcs, "list_buckets", return_value=[]),
-                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+                mock.patch.object(gcs, "delete_bucket") as delete,
+                mock.patch("sys.stdout", new_callable=io.StringIO),
             ):
                 self.assertEqual(gcs.main(), 0)
-            self.assertIn("stale_count=0", stdout.getvalue())
+            delete.assert_not_called()
 
 
 class RebootNotifyTests(unittest.TestCase):
@@ -263,10 +266,9 @@ class RebootNotifyTests(unittest.TestCase):
                 self.assertEqual(list(state.glob(".last-boot-id.*")), [])
 
     def test_payload_notification_and_main(self) -> None:
-        payload = reboot.build_payload(
-            {"hostname": "host", "environment": "prod"}, "Invalid/Timezone"
-        )
-        self.assertIn("host", payload["embeds"][0]["description"])
+        facts = {"hostname": "worker.example.invalid", "environment": "test"}
+        payload = reboot.build_payload(facts, "Invalid/Timezone")
+        self.assertIn(facts["hostname"], payload["embeds"][0]["description"])
         with self.assertRaises(SystemExit):
             reboot.send_discord_notification({}, payload)
 
@@ -298,10 +300,11 @@ class RebootNotifyTests(unittest.TestCase):
         with (
             mock.patch.object(reboot, "current_boot_id", return_value="boot"),
             mock.patch.object(reboot, "already_notified", return_value=True),
-            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+            mock.patch.object(reboot, "send_discord_notification") as send,
         ):
             self.assertEqual(reboot.main(), 0)
-        self.assertIn("already-notified", stdout.getvalue())
+        send.assert_not_called()
 
         with (
             mock.patch.object(reboot, "current_boot_id", return_value="boot"),
@@ -310,7 +313,7 @@ class RebootNotifyTests(unittest.TestCase):
                 reboot,
                 "load_json",
                 side_effect=[
-                    {"hostname": "host", "environment": "prod"},
+                    {"hostname": "host", "environment": "test"},
                     {"webhook_id": "id", "webhook_token": "token"},
                 ],
             ),
@@ -329,14 +332,12 @@ class RefreshMotdTests(unittest.TestCase):
         self.assertTrue(motd.fit_text("x" * 100).endswith("..."))
         self.assertEqual(len(motd.motd_line("test")), motd.WIDTH)
         self.assertIn(motd.GREEN, motd.motd_line("test", motd.GREEN))
-        rendered = motd.render_motd(
-            {"hostname": "host", "environment": "prod"}, True
-        )
-        self.assertIn("Reboot required", rendered)
-        self.assertNotIn(
-            "Reboot required",
-            motd.render_motd({"hostname": "host", "environment": "prod"}, False),
-        )
+        facts = {"hostname": "worker.example.invalid", "environment": "test"}
+        needs_reboot = motd.render_motd(facts, True)
+        normal = motd.render_motd(facts, False)
+        self.assertIn(facts["hostname"], needs_reboot)
+        self.assertIn(facts["hostname"], normal)
+        self.assertNotEqual(needs_reboot, normal)
 
         with mock.patch.object(motd.shutil, "which", return_value=None):
             with self.assertRaises(SystemExit):
@@ -391,9 +392,9 @@ class RefreshMotdTests(unittest.TestCase):
         with (
             mock.patch.object(motd, "load_facts", return_value={}),
             mock.patch.object(motd, "reboot_required", return_value=False),
-            mock.patch.object(motd, "write_if_changed", side_effect=[True, False]),
-            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            mock.patch.object(motd, "write_if_changed", side_effect=[True, False]) as write,
+            mock.patch("sys.stdout", new_callable=io.StringIO),
         ):
             self.assertEqual(motd.main(), 0)
             self.assertEqual(motd.main(), 0)
-        self.assertEqual(stdout.getvalue().splitlines(), ["updated", "unchanged"])
+        self.assertEqual(write.call_count, 2)

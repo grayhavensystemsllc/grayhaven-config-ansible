@@ -36,21 +36,21 @@ def managed_webauthn_values(hostname: str) -> dict[str, str]:
 def fixture_context(hostname: str = "timetracker.example.invalid") -> dict[str, object]:
     webauthn = managed_webauthn_values(hostname)
     return {
-        "baseline_validation_timezone": "America/Chicago",
+        "baseline_validation_timezone": "Etc/UTC",
         "timetracker": {
-            "backup_dir": "/var/lib/grayhaven/timetracker/backups",
-            "branding_dir": "/var/lib/grayhaven/timetracker/branding",
-            "data_dir": "/var/lib/grayhaven/timetracker/data",
+            "backup_dir": "/fixture/backups",
+            "branding_dir": "/fixture/branding",
+            "data_dir": "/fixture/data",
             "hostname": hostname,
             "image_digest": "sha256:" + ("a" * 64),
-            "secrets_dir": "/var/lib/grayhaven/timetracker/secrets",
+            "secrets_dir": "/fixture/secrets",
         },
-        "timetracker_container_name": "grayhaven-timetracker",
-        "timetracker_container_port": 8000,
-        "timetracker_database_filename": "timetracker.sqlite3",
+        "timetracker_container_name": "mock-application",
+        "timetracker_container_port": 3419,
+        "timetracker_database_filename": "fixture.sqlite3",
         "timetracker_gid": 777,
-        "timetracker_host_port": 8000,
-        "timetracker_image_repository": "ghcr.io/example/grayhaven-timetracker",
+        "timetracker_host_port": 3420,
+        "timetracker_image_repository": "registry.example.invalid/fixture/application",
         "timetracker_tls_mode": "host",
         "timetracker_uid": 777,
         "timetracker_webauthn_origin": webauthn["origin"],
@@ -76,11 +76,11 @@ def render_templates(
     return rendered
 
 
-def validate(rendered: dict[str, str]) -> None:
+def validate(rendered: dict[str, str], *, check_tasks: bool = True) -> None:
     quadlet = rendered["grayhaven-timetracker.container"]
     nginx = rendered["grayhaven-timetracker.conf"]
-    service_tasks = SERVICE_TASKS.read_text(encoding="utf-8")
-    nginx_tasks = NGINX_TASKS.read_text(encoding="utf-8")
+    service_tasks = SERVICE_TASKS.read_text(encoding="utf-8") if check_tasks else ""
+    nginx_tasks = NGINX_TASKS.read_text(encoding="utf-8") if check_tasks else ""
     rp_id_match = re.search(r"^Environment=WEBAUTHN_RP_ID=(.*)$", quadlet, re.MULTILINE)
     origin_match = re.search(r"^Environment=WEBAUTHN_ORIGIN=(.*)$", quadlet, re.MULTILINE)
     if not rp_id_match or not origin_match:
@@ -92,9 +92,10 @@ def validate(rendered: dict[str, str]) -> None:
         raise RuntimeError(str(exc)) from exc
     if origin_match.group(1) != expected_webauthn["origin"]:
         raise RuntimeError("WebAuthn origin must be exactly https:// followed by the RP ID")
+    fixture = fixture_context(rp_id)
     required_quadlet = (
-        "Image=ghcr.io/example/grayhaven-timetracker@sha256:",
-        "PublishPort=127.0.0.1:8000:8000",
+        f'Image={fixture["timetracker_image_repository"]}@{fixture["timetracker"]["image_digest"]}',
+        f'PublishPort=127.0.0.1:{fixture["timetracker_host_port"]}:{fixture["timetracker_container_port"]}',
         "Environment=GUNICORN_CMD_ARGS=--no-control-socket",
         f"headers={{'Host': '{rp_id}'}}",
         "NoNewPrivileges=true",
@@ -105,7 +106,7 @@ def validate(rendered: dict[str, str]) -> None:
     required_nginx = (
         f"server_name {rp_id};",
         'add_header X-Robots-Tag "noindex, nofollow, noarchive" always;',
-        "proxy_pass http://127.0.0.1:8000;",
+        f'proxy_pass http://127.0.0.1:{fixture["timetracker_host_port"]};',
         "proxy_set_header X-Forwarded-Proto https;",
         "location = /health",
         "/shared/reports/[redacted]",
@@ -122,8 +123,10 @@ def validate(rendered: dict[str, str]) -> None:
         raise RuntimeError(
             "Time Tracker indexing policy must cover both HTTP and HTTPS servers"
         )
-    if "0.0.0.0:8000" in quadlet:
+    if f'0.0.0.0:{fixture["timetracker_host_port"]}' in quadlet:
         raise RuntimeError("Time Tracker container port must remain loopback-only")
+    if not check_tasks:
+        return
     required_service_probe = (
         'url: "http://127.0.0.1:{{ timetracker_host_port }}/health"',
         'Host: "{{ timetracker.hostname }}"',
