@@ -30,6 +30,7 @@ scripts/install-galaxy-collections
 Install Grafana Alloy from the official Grafana package repository when working
 on observability templates. It is used for local configuration validation only;
 do not configure local metric or log shipping from a workstation.
+Install Prometheus `promtool` to run the alert behavior unit tests.
 
 The Python packages in `pip3_requirements.txt` are pinned with hashes and cover
 the runtime prerequisites for the DigitalOcean Ansible collection used by the

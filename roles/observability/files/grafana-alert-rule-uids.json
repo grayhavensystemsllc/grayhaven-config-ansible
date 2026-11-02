@@ -80,6 +80,7 @@
   "host:grayhaven-sec-prod-bastion-01.grayhavensystems.com:restic_timer": "gh-322003f1ba71b665eb68bcd0",
   "host:grayhaven-sec-prod-bastion-01.grayhavensystems.com:sshd_service": "gh-67d11d496c9e52a4a1447b31",
   "host:grayhaven-sec-prod-bastion-01.grayhavensystems.com:swap_utilization": "gh-833bf1f97ea1df6b3fe5ed0f",
+  "service:Ansible:ansible_runner_state_metric": "gh-4efe6e06adc87a66e767d60e",
   "service:DigitalOcean API:digitalocean_service_status": "gh-33aee0c140437c31b9d2d01d",
   "service:DigitalOcean Cloud Control Panel:digitalocean_service_status": "gh-c38f29474e22fe14ba6b583e",
   "service:DigitalOcean DNS:digitalocean_service_status": "gh-7fbf38da09a46837e627a268",

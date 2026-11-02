@@ -351,6 +351,50 @@ def host_selector(host: str) -> str:
     return f'host="{promql_string(host)}"'
 
 
+def runner_state_queries(config: dict[str, Any]) -> tuple[str | None, str, int]:
+    control_hosts = sorted({host["fqdn"] for host in config["hosts"] if host.get("control_node")})
+    if not control_hosts:
+        return None, "vector(0)", 1
+
+    selector = (
+        "node_systemd_unit_state{"
+        f'host=~"{domain_regex(control_hosts)}",'
+        'name="grayhaven-ansible-runner.service",state=~"active|activating"}'
+    )
+    # Both state series must be fresh before a previous active sample can suppress CPU.
+    fresh = f"(count by (host) (count by (host, state) (last_over_time({selector}[2m]))) == 2)"
+    reporting = f"(count({fresh}) or vector(0))"
+    recent = f"(max by (host) (max_over_time({selector}[15m])) > 0)"
+    suppress = (
+        f"(max({recent} and on (host) {fresh}) "
+        f"and on () ({reporting} == {len(control_hosts)}))"
+    )
+    return suppress, reporting, len(control_hosts)
+
+
+def runner_state_metric_rule(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> dict[str, Any]:
+    _, reporting, expected = runner_state_queries(config)
+    return alert_rule(
+        identity=service_rule_identity("Ansible", "ansible_runner_state_metric"),
+        uid_registry=config["uid_registry"],
+        title="Ansible runner state metric",
+        folder_uid=folder_uid,
+        rule_group=config["grafana"]["evaluation_group"],
+        datasource_uid=datasource_uid,
+        expression=reporting,
+        evaluator_type="lt",
+        threshold=expected,
+        duration="5m",
+        no_data_state="Alerting",
+        labels=base_labels(config, {"check": "ansible_runner_state_metric", "role": "bastion", "service": "Ansible"}),
+        annotations={
+            "summary": "Ansible runner state metric is missing",
+            "description": "The control bastion's Ansible runner state metric is not reporting.",
+        },
+        contact_point=config["grafana"]["contact_point"],
+    )
+
+
 def service_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
     rules = []
     service_config = config["service_units"]
@@ -393,6 +437,7 @@ def service_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) 
 def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
     rules = []
     thresholds = config["thresholds"]
+    runner_suppression, _, _ = runner_state_queries(config)
     for host in config["hosts"]:
         common = {
             "uid_registry": config["uid_registry"],
@@ -466,15 +511,18 @@ def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: s
                 )
             )
 
-        cpu_minutes = 15 if host["role"] == "mcp" else 5
+        cpu_minutes = 5
+        cpu_expression = (
+            "100 * (1 - avg by (host, environment, role, project, client) "
+            f'(rate(node_cpu_seconds_total{{{host_selector(host["fqdn"])},mode="idle"}}[{cpu_minutes}m])))'
+        )
+        if runner_suppression:
+            cpu_expression = f"{cpu_expression} unless on () {runner_suppression}"
         rules.append(
             alert_rule(
                 identity=host_rule_identity(host, "cpu_utilization"),
                 title=f"{host['short_hostname']} CPU utilization",
-                expression=(
-                    "100 * (1 - avg by (host, environment, role, project, client) "
-                    f'(rate(node_cpu_seconds_total{{{host_selector(host["fqdn"])},mode="idle"}}[{cpu_minutes}m])))'
-                ),
+                expression=cpu_expression,
                 evaluator_type="gte",
                 threshold=float(thresholds["cpu_percent"]),
                 duration="5m",
@@ -1298,6 +1346,7 @@ def public_status_rules(config: dict[str, Any], folder_uid: str, datasource_uid:
 def desired_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> dict[str, dict[str, Any]]:
     rules = []
     rules.extend(host_metric_rules(config, folder_uid, datasource_uid))
+    rules.append(runner_state_metric_rule(config, folder_uid, datasource_uid))
     rules.extend(service_rules(config, folder_uid, datasource_uid))
     rules.extend(site_rules(config, folder_uid, datasource_uid))
     rules.extend(external_service_rules(config, folder_uid, datasource_uid))

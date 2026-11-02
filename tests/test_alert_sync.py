@@ -54,13 +54,13 @@ def complete_config() -> dict[str, object]:
 
 
 class AlertRuleTests(unittest.TestCase):
-    def test_host_role_selects_cpu_window_without_changing_threshold_or_pending(self) -> None:
+    def test_cpu_window_and_pending_are_consistent_across_host_roles(self) -> None:
         checks = (
             "metrics_data", "cpu_utilization", "memory_utilization",
             "filesystem_space", "filesystem_inode", "swap_utilization",
             "restic_stale_backup",
         )
-        for role, minutes in (("mcp", 15), ("web", 5), ("bastion", 5)):
+        for role, minutes in (("mcp", 5), ("web", 5), ("bastion", 5)):
             for threshold in (37.5, 91):
                 with self.subTest(role=role, threshold=threshold):
                     host = {
