@@ -94,6 +94,14 @@
     group: root
     mode: "0755"
 
+- name: Install restic workflow helper
+  ansible.builtin.copy:
+    src: grayhaven-restic-workflow
+    dest: /usr/local/sbin/grayhaven-restic-workflow
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install local restic backup script
   ansible.builtin.copy:
     dest: /usr/local/sbin/grayhaven-restic-backup
@@ -104,6 +112,9 @@
       #!/usr/bin/env bash
       set -Eeuo pipefail
 
+      # Read by Backupctl to verify repository selection support.
+      # shellcheck disable=SC2034
+      BACKUP_REPOSITORY_SELECTION=true
       LOCAL_REPOSITORY={{ restic_backup_repository_path | quote }}
       REMOTE_ENABLED={{ 'true' if restic_backup_remote_gcs_enabled else 'false' }}
       REMOTE_REPOSITORY={{ restic_backup_remote_gcs_repository | default('') | quote }}
@@ -123,6 +134,17 @@
       MCP_BACKUP_ENABLED={{ 'true' if grayhaven_role == 'mcp' else 'false' }}
       MCP_BACKUP_DIR={{ (mcp.backup_dir if grayhaven_role == 'mcp' else '') | quote }}
       MCP_BACKUP_RETENTION_DAYS={{ (mcp.backup_retention_days | default(14)) | quote }}
+
+      if (( $# == 0 )); then
+        selected_repository=all
+      elif (( $# == 2 )) && [[ "$1" == "--repo" ]]; then
+        selected_repository="$2"
+      else
+        printf 'Usage: grayhaven-restic-backup [--repo all|local|remote]\n' >&2
+        exit 2
+      fi
+      backup_steps="$(/usr/local/sbin/grayhaven-restic-workflow select \
+        "$selected_repository" "$REMOTE_ENABLED")"
 
       export RESTIC_CACHE_DIR
 
@@ -305,15 +327,32 @@
         successful_repositories+=("$label")
       }
 
-      create_timetracker_backup
-      create_mcp_backup
-      backup_repository "$LOCAL_REPOSITORY" local
-
-      if [[ "$REMOTE_ENABLED" == "true" ]]; then
-        export GOOGLE_PROJECT_ID="$GCS_PROJECT_ID"
-        export GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS_FILE"
-        backup_repository "$REMOTE_REPOSITORY" remote
-      fi
+      snapshot_prepared=false
+      while IFS= read -r step; do
+        case "$step" in
+          snapshot)
+            [[ "$snapshot_prepared" == "false" ]] || exit 1
+            create_timetracker_backup
+            create_mcp_backup
+            snapshot_prepared=true
+            ;;
+          local)
+            [[ "$snapshot_prepared" == "true" ]] || exit 1
+            backup_repository "$LOCAL_REPOSITORY" local
+            ;;
+          remote)
+            [[ "$snapshot_prepared" == "true" ]] || exit 1
+            export GOOGLE_PROJECT_ID="$GCS_PROJECT_ID"
+            export GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS_FILE"
+            backup_repository "$REMOTE_REPOSITORY" remote
+            ;;
+          *)
+            printf 'Invalid backup workflow step\n' >&2
+            exit 1
+            ;;
+        esac
+      done <<< "$backup_steps"
+      [[ "$snapshot_prepared" == "true" && -v 'successful_repositories[0]' ]]
 
       prune_timetracker_backups
       prune_mcp_backups
@@ -345,13 +384,12 @@
           done
           printf '# HELP grayhaven_restic_repository_restore_size_bytes Latest restore-size bytes by repository.\n'
           printf '# TYPE grayhaven_restic_repository_restore_size_bytes gauge\n'
-          for repository_label in local; do
-            [[ -v "repository_restore_size_bytes[$repository_label]" ]] || continue
+          if [[ -v 'repository_restore_size_bytes[local]' ]]; then
             printf 'grayhaven_restic_repository_restore_size_bytes{host="%s",repository="%s"} %s\n' \
               "$(hostname -f)" \
-              "$repository_label" \
-              "${repository_restore_size_bytes[$repository_label]}"
-          done
+              local \
+              "${repository_restore_size_bytes[local]}"
+          fi
           printf '# HELP grayhaven_restic_repository_snapshot_count Restic snapshot count by repository.\n'
           printf '# TYPE grayhaven_restic_repository_snapshot_count gauge\n'
           for repository_label in "${successful_repositories[@]}"; do
@@ -361,6 +399,15 @@
               "${repository_snapshot_count[$repository_label]}"
           done
         } > "$tmp_file"
+        if [[ "$selected_repository" != "all" ]]; then
+          merged_file="$(mktemp "${TEXTFILE_DIR}/restic-merged.XXXXXX")"
+          if ! /usr/local/sbin/grayhaven-restic-workflow merge "${TEXTFILE_DIR}/restic.prom" \
+            "$tmp_file" "$(hostname -f)" "$selected_repository" > "$merged_file"; then
+            rm -f -- "$tmp_file" "$merged_file"
+            exit 1
+          fi
+          mv -- "$merged_file" "$tmp_file"
+        fi
         chmod 0644 "$tmp_file"
         mv "$tmp_file" "${TEXTFILE_DIR}/restic.prom"
       fi

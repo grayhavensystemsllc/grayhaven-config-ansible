@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Select backup steps and preserve untouched repository metrics."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import re
+
+FAMILY = re.compile(r"^# HELP ([a-zA-Z_:][a-zA-Z0-9_:]*) ")
+SAMPLE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\}\s+\S+")
+LABEL = re.compile(r'(?:^|,)([a-zA-Z_][a-zA-Z0-9_]*)="([^"\\]*)"(?=,|$)')
+
+
+def sample_identity(line: str) -> tuple[str, str, str] | None:
+    match = SAMPLE.match(line)
+    if match is None:
+        return None
+    labels = dict(LABEL.findall(match.group(2)))
+    if "host" not in labels or "repository" not in labels:
+        return None
+    return match.group(1), labels["host"], labels["repository"]
+
+
+def merge(previous: str, current: str, host: str, updated: str) -> str:
+    """Keep prior samples for other repositories within their metric families."""
+    current_lines = current.splitlines(keepends=True)
+    identities = {identity for line in current_lines if (identity := sample_identity(line))}
+    retained: dict[str, list[str]] = {}
+    for line in previous.splitlines():
+        identity = sample_identity(line)
+        if identity is None or identity[1] != host or identity[2] == updated or identity in identities:
+            continue
+        retained.setdefault(identity[0], []).append(line + "\n")
+        identities.add(identity)
+    result: list[str] = []
+    family: str | None = None
+    for line in current_lines:
+        match = FAMILY.match(line)
+        if match is not None:
+            if family is not None:
+                result.extend(retained.get(family, ()))
+            family = match.group(1)
+        result.append(line)
+    if family is not None:
+        result.extend(retained.get(family, ()))
+    return "".join(result)
+
+
+def select(selection: str, remote_enabled: bool) -> list[str]:
+    """Prepare one application snapshot, then back up the selected repositories."""
+    if selection not in ("all", "local", "remote"):
+        raise ValueError("Invalid backup repository selection")
+    if selection == "remote" and not remote_enabled:
+        raise ValueError("Remote backup is not configured")
+    steps = ["snapshot"]
+    if selection in ("all", "local"):
+        steps.append("local")
+    if remote_enabled and selection in ("all", "remote"):
+        steps.append("remote")
+    return steps
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    select_parser = commands.add_parser("select")
+    select_parser.add_argument("selection", choices=("all", "local", "remote"))
+    select_parser.add_argument("remote_enabled", choices=("true", "false"))
+    merge_parser = commands.add_parser("merge")
+    merge_parser.add_argument("previous", type=Path)
+    merge_parser.add_argument("current", type=Path)
+    merge_parser.add_argument("host")
+    merge_parser.add_argument("repository")
+    args = parser.parse_args(argv)
+    if args.command == "select":
+        try:
+            print("\n".join(select(args.selection, args.remote_enabled == "true")))
+        except ValueError as error:
+            parser.error(str(error))
+        return 0
+    try:
+        previous = args.previous.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        previous = ""
+    current = args.current.read_text(encoding="utf-8")
+    print(merge(previous, current, args.host, args.repository), end="")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - command-line entrypoint
+    raise SystemExit(main())
