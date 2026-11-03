@@ -14,6 +14,7 @@ include = [
   "files/grayhaven-ansible-automation-status",
   "roles/deploy_websites/files/grayhaven-website-deploy",
   "roles/restic_backup/files/grayhaven-restic-duration",
+  "roles/restic_backup/files/grayhaven-restic-workflow",
   "roles/observability/files/grayhaven-grafana-alert-sync",
   "roles/observability/files/grayhaven-irm-alert-groups-textfile",
   "roles/observability/files/grayhaven-observability-textfile",

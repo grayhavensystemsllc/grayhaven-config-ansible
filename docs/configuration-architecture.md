@@ -428,8 +428,11 @@ to create an encrypted online backup in its dedicated backup directory and
 verifies that artifact before publishing its final filename. Restic includes
 that verified-artifact directory and explicitly excludes the live SQLCipher
 database plus its WAL and SHM sidecars. Local artifacts are pruned only after
-all configured restic repositories complete successfully. Bastion backups skip
-the application snapshot step.
+the selected restic repositories complete successfully. On MCP hosts, the
+backup service creates and verifies an encrypted online database snapshot in
+its backup directory before backing up the selected repositories. Bastion
+backups skip the application snapshot step. The scheduled backup and all
+Backupctl repository selections use the same managed workflow.
 
 When `backup.include` is set in `grayhaven-vault/config.yml`, that explicit
 list is appended after the configured homedir archive path. This keeps
