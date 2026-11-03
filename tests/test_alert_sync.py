@@ -104,6 +104,15 @@ class AlertRuleTests(unittest.TestCase):
             with self.subTest(duration=duration):
                 rule = alert_sync.alert_rule(**arguments, duration=duration)
                 self.assertEqual(rule, {**baseline, "for": expected})
+        for duration, minimum, expected in (
+            ("2m", "1m", "2m"), ("20s", "1m", "1m"),
+            ("7m", "3m", "7m"),
+        ):
+            with self.subTest(duration=duration, minimum=minimum):
+                rule = alert_sync.alert_rule(
+                    **arguments, duration=duration, minimum_duration=minimum
+                )
+                self.assertEqual(rule, {**baseline, "for": expected})
 
     def test_helpers_and_rule_generation(self) -> None:
         self.assertTrue(alert_sync.valid_rule_uid("gh-" + "a" * 24))
