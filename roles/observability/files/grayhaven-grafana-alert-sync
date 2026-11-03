@@ -305,6 +305,7 @@ def alert_rule(
     contact_point: str,
     duration: str = "5m",
     no_data_state: str = "OK",
+    minimum_duration: str = "5m",
 ) -> dict[str, Any]:
     return {
         "_identity": identity,
@@ -319,7 +320,7 @@ def alert_rule(
         ],
         "noDataState": no_data_state,
         "execErrState": "Error",
-        "for": duration if duration_seconds(duration) >= 300 else "5m",
+        "for": duration if duration_seconds(duration) >= duration_seconds(minimum_duration) else minimum_duration,
         "annotations": annotations,
         "labels": {**labels, MANAGED_LABEL: MANAGED_VALUE},
         "isPaused": False,
@@ -479,6 +480,11 @@ def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: s
         if application_site is not None:
             application_name = application_site.get("display_name", "Time Tracker")
             health_check = application_site.get("health_check", "timetracker_health")
+            health_pending = application_site.get("health_pending", "5m")
+            health_seconds = duration_seconds(health_pending)
+            health_duration = {60: "one minute", 300: "five minutes"}.get(
+                health_seconds, f"{health_seconds} seconds"
+            )
             rules.append(
                 alert_rule(
                     identity=host_rule_identity(host, health_check),
@@ -491,7 +497,8 @@ def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: s
                     ),
                     evaluator_type="lt",
                     threshold=1,
-                    duration="5m",
+                    duration=health_pending,
+                    minimum_duration=health_pending,
                     labels=base_labels(
                         config,
                         {
@@ -506,7 +513,7 @@ def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: s
                         "summary": f"{application_name} health check failed",
                         "description": (
                             f"{host['fqdn']} {application_name} local health endpoint "
-                            "has not returned 200 OK for at least five minutes."
+                            f"has not returned 200 OK for at least {health_duration}."
                         ),
                     },
                     **common,

@@ -148,6 +148,7 @@
       cert_name: "{{ mcp.hostname }}"
       redirect_http: false
       health_check: mcp_health
+      health_pending: "1m"
       health_url: "http://127.0.0.1:{{ mcp_host_port | default(8787) }}{{ mcp_health_path | default('/healthz') }}"
       nginx_log_names: [access, error]
   when:

@@ -192,8 +192,9 @@ support concise status reporting without exposing raw service payloads.
 ## Managed Alerts
 
 Managed rules use a minimum five-minute pending period to tolerate brief
-failures. Existing longer rule-specific periods are preserved. Query errors
-remain configured as errors so sustained failures remain visible.
+failures, except the MCP health check, which uses one minute. Existing longer
+rule-specific periods are preserved. Query errors remain configured as errors
+so sustained failures remain visible.
 
 The active control node syncs Grafana Cloud alert rules during convergence.
 Managed alert rules are labeled `configured_by=ansible`; Ansible only creates,
