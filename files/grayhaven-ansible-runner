@@ -34,6 +34,7 @@ ANSIBLE_INVENTORY_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-inventory"
 ANSIBLE_PLAYBOOK_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-playbook"
 ANSIBLE_VAULT_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-vault"
 RUNNER_COMMAND="converge"
+RUNNER_PROCESS_ID=""
 GCS_CLEANUP_EXECUTE="false"
 RUNNER_EXTRA_VARS_FILES=()
 
@@ -406,7 +407,12 @@ PY
 on_error() {
   local status="$?"
 
+  trap - ERR
   set +e
+  # Inherited subshell traps propagate the failure to the owning runner.
+  if [[ -n "$RUNNER_PROCESS_ID" && "$BASHPID" != "$RUNNER_PROCESS_ID" ]]; then
+    exit "$status"
+  fi
   if [[ "$RUNNER_COMMAND" == "converge" ]]; then
     write_convergence_metric 0 || log "Convergence failure metric could not be written."
     send_failure_notification "$status"
@@ -1055,6 +1061,7 @@ run_once() {
 main() {
   drop_to_ansible "$@"
   parse_args "$@"
+  RUNNER_PROCESS_ID="$BASHPID"
   trap cleanup_runtime_files EXIT
 
   exec 9>"$LOCK_FILE"
