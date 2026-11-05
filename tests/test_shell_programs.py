@@ -151,6 +151,38 @@ class ShellProgramTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("rotate-control", result.stdout)
 
+    def test_runner_failure_is_reported_once_by_its_own_invocation(self) -> None:
+        for fault, status in (("direct", 17), ("subshell", 1), ("pipeline", 1)):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as folder:
+                notices = pathlib.Path(folder) / "notices"
+                for invocation in range(2):
+                    result = self.run_bash(
+                        """
+                        export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                        source files/grayhaven-ansible-runner
+                        LOCK_FILE="$FIXTURE_ROOT/lock"
+                        PENDING_FILE="$FIXTURE_ROOT/pending"
+                        drop_to_ansible() { :; }
+                        cleanup_runtime_files() { :; }
+                        write_convergence_metric() { :; }
+                        send_failure_notification() {
+                          printf '%s\\n' "$1" >> "$FIXTURE_ROOT/notices"
+                          return "$1"
+                        }
+                        run_once() {
+                          case "$FAULT" in
+                            direct) return 17 ;;
+                            subshell) ( false ) ;;
+                            pipeline) ( false ) | cat ;;
+                          esac
+                        }
+                        main
+                        """,
+                        env={"FIXTURE_ROOT": folder, "FAULT": fault},
+                    )
+                    self.assertEqual(result.returncode, status, result.stderr)
+                    self.assertEqual(notices.read_text().splitlines(), [str(status)] * (invocation + 1))
+
     def test_runner_retries_failure_notification_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             curl_args = pathlib.Path(temp_dir) / "curl-args"
@@ -169,6 +201,29 @@ class ShellProgramTests(unittest.TestCase):
             arguments = shlex.split(curl_args.read_text(encoding="utf-8"))
             for option in ("--retry", "--retry-max-time"):
                 self.assertGreater(int(arguments[arguments.index(option) + 1]), 0)
+
+    def test_success_and_other_runner_commands_do_not_send_failure_notices(self) -> None:
+        for command, status in (("converge", 0), ("fixture-action", 19)):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as folder:
+                result = self.run_bash(
+                    """
+                    export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                    source files/grayhaven-ansible-runner
+                    LOCK_FILE="$FIXTURE_ROOT/lock"
+                    PENDING_FILE="$FIXTURE_ROOT/pending"
+                    drop_to_ansible() { :; }
+                    parse_args() { RUNNER_COMMAND="$FIXTURE_COMMAND"; }
+                    cleanup_runtime_files() { :; }
+                    write_convergence_metric() { :; }
+                    send_failure_notification() { touch "$FIXTURE_ROOT/notified"; }
+                    run_once() { return "$FIXTURE_STATUS"; }
+                    main
+                    """,
+                    env={"FIXTURE_ROOT": folder, "FIXTURE_COMMAND": command,
+                         "FIXTURE_STATUS": str(status)},
+                )
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertFalse((pathlib.Path(folder) / "notified").exists())
 
     def test_poller_change_and_no_change_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
