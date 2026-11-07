@@ -3,9 +3,10 @@
   hosts: localhost
   vars:
     ansible_python_interpreter: "/usr/bin/python3"
-    baseline_validation_environment: "{{ grayhaven_environment }}"
   connection: local
   become: true
+  vars_files:
+    - ../vars/implementation.yml
 
   tasks:
     # Validate the OpenTofu/cloud-init handoff before any persistent host
@@ -29,8 +30,11 @@
           - grayhaven_ansible_deploy_public_key is defined
           - grayhaven_ansible_deploy_public_key is string
           - grayhaven_ansible_deploy_public_key | trim | length > 0
-          - grayhaven_certificate_environment is defined
-          - grayhaven_certificate_environment in ["staging", "production"]
+          - grayhaven_ansible_control_public_key is defined
+          - grayhaven_ansible_control_public_key is string
+          - grayhaven_ansible_control_public_key | trim | length > 0
+          - certificate.environment is defined
+          - certificate.environment in ["staging", "production"]
           - grayhaven_tls_mode is defined
           - grayhaven_tls_mode in ["host", "load_balancer"]
         fail_msg: "Required common bootstrap variables were not provided correctly by the OpenTofu/cloud-init handoff."
@@ -105,7 +109,12 @@
         owner: ansible
         group: ansible
         mode: "0600"
-        content: "{{ grayhaven_ansible_deploy_public_key | trim }}\n"
+        content: |
+          {% for public_key in [grayhaven_ansible_deploy_public_key,
+                                grayhaven_ansible_control_public_key] | map('trim') | unique %}
+          {{ public_key }}
+          {% endfor %}
+      no_log: true
 
     - name: Install bootstrap vault deploy private key on bastion hosts
       ansible.builtin.copy:
@@ -128,6 +137,7 @@
 
     # The id_ed25519 bootstrap copy is temporary first-boot access. Full
     # convergence replaces it with the vault-defined Ansible control key.
+      no_log: true
     - name: Install temporary bootstrap Ansible control private key on bastion hosts
       ansible.builtin.copy:
         dest: /home/ansible/.ssh/id_ed25519
@@ -146,6 +156,7 @@
         mode: "0644"
         content: "{{ grayhaven_ansible_deploy_public_key | trim }}\n"
       when: grayhaven_role == "bastion"
+      no_log: true
 
     - name: Create Grayhaven Systems LLC secrets directory
       ansible.builtin.file:
@@ -154,6 +165,7 @@
         owner: root
         group: ansible
         mode: "0750"
+      no_log: true
 
     - name: Store Ansible Vault password on bastion hosts
       ansible.builtin.copy:
@@ -170,8 +182,7 @@
         name: digitalocean_agent
         tasks_from: remove-droplet-agent
 
-    # Bootstrap installs only the packages needed to fetch and run the full
-    # convergence runner. Normal convergence owns full package state.
+    # Bootstrap installs the baseline packages needed by the first runner.
     - name: Install bootstrap runner OS dependencies
       ansible.builtin.include_role:
         name: system_packages
@@ -182,17 +193,6 @@
       ansible.builtin.include_role:
         name: automation_runner
         tasks_from: environment
-      vars:
-        automation_runner_bootstrap_repo_url: https://github.com/grayhavensystemsllc/grayhaven-config-ansible.git
-        automation_runner_bootstrap_config_repo_ref: "{{ grayhaven_config_repo_ref }}"
-        automation_runner_bootstrap_checkout_dir: /home/ansible/grayhaven-config-ansible
-        automation_runner_bootstrap_vault_repo_url: "{{ grayhaven_vault_repo_url }}"
-        automation_runner_bootstrap_vault_repo_ref: "{{ grayhaven_vault_repo_ref }}"
-        automation_runner_bootstrap_vault_checkout_dir: /home/ansible/grayhaven-vault
-        automation_runner_bootstrap_hostname: "{{ grayhaven_hostname }}"
-        automation_runner_bootstrap_is_control_node: "{{ grayhaven_is_control_node | bool }}"
-        automation_runner_bootstrap_certificate_environment: "{{ grayhaven_certificate_environment }}"
-        automation_runner_bootstrap_tls_mode: "{{ grayhaven_tls_mode }}"
       when: grayhaven_role == "bastion"
 
     - name: Install bootstrap runner files

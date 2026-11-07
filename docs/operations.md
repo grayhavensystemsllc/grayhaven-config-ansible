@@ -187,14 +187,14 @@ curl \
   --show-error \
   --request POST \
   --header "Content-Type: application/json" \
-  --user-agent "GrayhavenSystemsLLC/1.0 (+https://grayhavensystems.com)" \
+  --user-agent "ExampleClient/1.0 (+https://example.com)" \
   --data @- \
   "$WEBHOOK_URL" <<'JSON'
 {
   "embeds": [
     {
       "title": "Server Rebooted",
-      "description": "manual-test.grayhavensystems.com\n\nEnvironment: test\n2026-06-12 01:00 PM CDT",
+      "description": "manual-test.example.com\n\nEnvironment: test\n2026-06-12 01:00 PM CDT",
       "color": 5811424
     }
   ]
@@ -210,7 +210,7 @@ Discord returns HTTP `204` when the webhook accepts the notification.
 
 Rotate the webhook from the workstation's `grayhaven-vault` checkout. Use
 `main` and `discord_webhooks.production` for production, or `staging` and
-`discord_webhooks.testing` for staging. Keep the old webhook active until the
+`discord_webhooks.staging` for staging. Keep the old webhook active until the
 replacement is in use.
 
 1. Create a replacement webhook in Discord. Leave the old webhook in place.
@@ -822,7 +822,7 @@ for managed-host SSH. The playbook removes the staged key files from bastions.
 ## Ansible Control Key Rotation
 
 Normal convergence enforces the vault-defined Ansible control key. After
-updating `ansible_control_public_key` and `ansible_control_private_key` in
+updating `ansible_control.public_key` and `ansible_control.private_key` in
 encrypted `grayhaven-vault` data, run the normal runner service from the active
 control bastion.
 
@@ -911,21 +911,21 @@ health endpoint after convergence or maintenance.
 
 ## Changing the Managed Timezone
 
-The `grayhaven_timezone` Ansible variable controls both the operating-system
+The `timezone` Ansible variable controls both the operating-system
 timezone and the Time Tracker container's `TZ` setting. Do not change the
 timezone directly on a managed host or inside the container.
 
-1. From the `grayhaven-config-ansible` repository root on the operator
-   workstation, open the baseline defaults file.
+1. From the `grayhaven-vault` repository root on the operator workstation,
+   open the operational settings file.
 
    ```bash
-   "${EDITOR:-vi}" roles/baseline_validation/defaults/main.yml
+   "${EDITOR:-vi}" server_configuration.yml
    ```
 
-2. Set `grayhaven_timezone` to the required IANA timezone name.
+2. Set `timezone` to the required IANA timezone name.
 
    ```yaml
-   grayhaven_timezone: <Area/Location>
+   timezone: <Area/Location>
    ```
 
 3. Confirm that the selected timezone exists in the workstation's timezone
@@ -936,19 +936,15 @@ timezone directly on a managed host or inside the container.
    test -f "/usr/share/zoneinfo/${TIMEZONE}"
    ```
 
-4. Validate the changed YAML, rendered Time Tracker configuration, Markdown,
-   and Git diff.
+4. Validate the changed YAML and Git diff.
 
    ```bash
-   yamllint roles/baseline_validation/defaults/main.yml
-   scripts/validate-rendered-timetracker-config
-   git ls-files '*.md' | xargs -r markdownlint-cli2
+   yamllint server_configuration.yml
    git diff --check
    ```
 
-5. Follow the repository's [contribution workflow](../CONTRIBUTING.md#workflow)
-   to commit, review, and publish the configuration change on the branch
-   tracked by the target environment.
+5. Follow the Vault repository contribution workflow to publish the change
+   on the branch tracked by the target environment.
 
 6. From the active control bastion, start normal configuration convergence.
 
@@ -1116,7 +1112,7 @@ bypass it for one SSH session by setting the bypass variable in the remote
 login shell:
 
 ```bash
-ssh -A -tt <user>@bastion.grayhavensystems.com 'cat /etc/motd; GRAYHAVEN_TMUX_AUTO_ATTACH_BYPASS=1 exec bash -l'
+ssh -A -tt <user>@bastion.example.com 'cat /etc/motd; GRAYHAVEN_TMUX_AUTO_ATTACH_BYPASS=1 exec bash -l'
 ```
 
 The
@@ -1184,10 +1180,10 @@ Useful silence matcher examples:
   `role=web`.
 - A single managed web server:
   `configured_by=ansible`, `client=grayhaven`, `environment=prod`,
-  `host=grayhaven-core-prod-web-01.grayhavensystems.com`.
+  `host=example-app-prod-web-01.example.com`.
 - A single managed domain:
   `configured_by=ansible`, `client=grayhaven`, `environment=prod`,
-  `domain=grayhavensystems.com`.
+  `domain=example.com`.
 
 Grafana Cloud integration is supported only for the `prod` environment. The
 [observability architecture](observability-architecture.md) documentation

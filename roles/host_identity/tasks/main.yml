@@ -97,16 +97,17 @@
     content: "{{ host_identity_local_fact | to_nice_json }}\n"
   vars:
     host_identity_local_fact:
-      environment: "{{ baseline_validation_environment }}"
+      environment: "{{ grayhaven_environment }}"
       hostname: "{{ inventory_hostname }}"
       role: "{{ grayhaven_role }}"
       control_node: "{{ automation_runner_host_is_control_node }}"
-      tls_mode: "{{ baseline_validation_tls_mode | default('host') }}"
-      certificate_environment: "{{ baseline_validation_certificate_environment | default('staging') }}"
+      tls_mode: "{{ grayhaven_tls_mode }}"
+      certificate_environment: "{{ certificate.environment }}"
       tags: "{{ do_tags | default([]) | sort }}"
       private_ipv4: "{{ grayhaven_private_ipv4 | default('') }}"
       public_ipv4: "{{ grayhaven_public_ipv4 | default('') }}"
     automation_runner_host_is_control_node: "{{ 'control-node' in (do_tags | default([])) }}"
+  no_log: true
 
 - name: Install login issue banner
   ansible.builtin.template:

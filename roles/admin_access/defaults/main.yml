@@ -1,5 +1,0 @@
----
-admin_access_default_homedir_archive_path: /var/backups/deleted-homedir-archives
-admin_access_vault_checkout_dir: >-
-  {{ baseline_validation_vault_checkout_dir | default('/home/ansible/grayhaven-vault') }}
-admin_access_tmux_workspace_dir: "{{ admin_access_vault_checkout_dir }}/files/tmux-workspaces"

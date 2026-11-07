@@ -154,7 +154,13 @@ class IrmRenderingTests(unittest.TestCase):
         self.assertTrue(irm.safe_string("x" * 200).endswith("..."))
         self.assertEqual(irm.alert_group_url({}), "")
         self.assertEqual(irm.local_timestamp("invalid"), "")
-        self.assertIn("CDT", irm.local_timestamp("2026-07-26T20:00:00Z"))
+        for stamp, zone, expected in (
+            ("2026-07-26T20:00:00Z", "America/Chicago", "2026-07-26 3:00 PM CDT"),
+            ("2026-01-26T20:00:00Z", "America/Chicago", "2026-01-26 2:00 PM CST"),
+            ("2026-01-26T20:00:00Z", "UTC", "2026-01-26 8:00 PM UTC"),
+            ("2026-01-26T20:00:00Z", "Invalid/Zone", ""),
+        ):
+            self.assertEqual(irm.local_timestamp(stamp, zone), expected)
         self.assertEqual(irm.state_sort_key("unknown"), "9")
         self.assertEqual(irm.state_display_name("new"), "Firing")
         self.assertEqual(irm.detail_user_display("bad", identities), "")

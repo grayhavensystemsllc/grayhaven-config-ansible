@@ -57,7 +57,7 @@ on repository-change poller events, or by manual invocation.
   scopes. Both files use the same commit and are validated before installation.
   A minimal container init process forwards signals and reaps exited children.
   Remote maintenance uses a bounded automation-user CPU quota and weight on MCP
-  hosts, configurable through the MCP role defaults.
+  hosts, configured in Vault `operations.yml`.
 - Validate Ansible, YAML, Markdown, and shell scripts through GitHub Actions.
 
 This repository is not a general-purpose deployment template. Deploying similar

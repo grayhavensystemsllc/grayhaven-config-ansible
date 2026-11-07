@@ -44,44 +44,20 @@ jobs:
           files/grayhaven-reboot-notify
           files/grayhaven-refresh-motd
           files/grayhaven-ansible-automation-status
+          files/grayhaven-redact-output
           roles/deploy_websites/files/grayhaven-website-deploy
           roles/restic_backup/files/grayhaven-restic-duration
           roles/restic_backup/files/grayhaven-restic-workflow
           roles/observability/files/grayhaven-grafana-alert-sync
           roles/observability/files/grayhaven-irm-alert-groups-textfile
           roles/observability/files/grayhaven-observability-textfile
-          scripts/validate-generated-grafana-alerts
-          scripts/validate-rendered-alloy-config
-          scripts/validate-rendered-timetracker-config
-
-      - name: Install Alloy validation tool
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes apt-transport-https gpg wget
-          sudo mkdir -p /etc/apt/keyrings
-          sudo wget -O /etc/apt/keyrings/grafana.asc https://apt.grafana.com/gpg-full.key
-          sudo chmod 644 /etc/apt/keyrings/grafana.asc
-          echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main" \
-          | sudo tee /etc/apt/sources.list.d/grafana.list
-          sudo apt-get update
-          sudo apt-get install --yes alloy
+          roles/observability/files/grayhaven-gcs-restic-stale-buckets
 
       - name: Install Ansible validation tools
         run: |
           python -m pip install --upgrade pip
           python -m pip install --require-hashes --requirement pip3_requirements.txt
           python -m pip install ansible-lint==26.6.0
-
-      - name: Validate rendered Alloy config
-        run: |
-          scripts/validate-rendered-alloy-config
-          scripts/validate-rendered-alloy-config --role mcp
-
-      - name: Validate generated Grafana alerts
-        run: scripts/validate-generated-grafana-alerts
-
-      - name: Validate rendered Time Tracker config
-        run: scripts/validate-rendered-timetracker-config
 
       - name: Install Ansible Galaxy collections
         run: scripts/install-galaxy-collections

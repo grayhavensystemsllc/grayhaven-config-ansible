@@ -76,9 +76,10 @@ class GcsCleanupTests(unittest.TestCase):
         error = urllib.error.HTTPError("url", 403, "forbidden", {}, io.BytesIO(b"denied"))
         with (
             mock.patch.object(gcs.urllib.request, "urlopen", side_effect=error),
-            self.assertRaisesRegex(gcs.CleanupError, "HTTP 403: denied"),
+            self.assertRaisesRegex(gcs.CleanupError, "HTTP 403") as raised,
         ):
             gcs.request("GET", "/test", "token")
+        self.assertNotIn("denied", str(raised.exception))
 
         retry = urllib.error.HTTPError(
             "url", 429, "rate limited", {"Retry-After": "0"}, io.BytesIO(b"")

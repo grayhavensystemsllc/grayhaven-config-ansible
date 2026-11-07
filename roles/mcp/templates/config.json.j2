@@ -1,6 +1,6 @@
-{{ mcp_repository_configuration | combine(mcp_config_overrides, recursive=true) | combine({
+{{ mcp_repository_configuration | combine({
   'secret_passphrase_path': mcp.secrets_dir ~ '/config_passphrase',
-  'deployment_environment': 'production' if baseline_validation_environment in ['prod', 'production'] else 'staging',
+  'deployment_environment': 'production' if grayhaven_environment in ['prod', 'production'] else 'staging',
   'state_database_path': mcp.data_dir ~ '/state.sqlite3',
   'proton': {'state_dir': mcp.sessions_dir ~ '/proton'},
   'notesnook': {'state_dir': mcp.sessions_dir ~ '/notesnook'},

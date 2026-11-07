@@ -23,7 +23,7 @@ LAST_BOOT_ID_PATH = STATE_DIR / "last-boot-id"
 DISCORD_API_BASE = "https://discord.com/api/webhooks"
 DISCORD_USER_AGENT = "GrayhavenSystemsLLC/1.0 grayhaven-reboot-notify"
 INFO_COLOR = 5811424
-DEFAULT_TIMEZONE = "America/Chicago"
+DEFAULT_TIMEZONE = "UTC"
 
 
 def load_json(path: Path, description: str) -> dict[str, object]:
@@ -81,7 +81,8 @@ def notification_timestamp(timezone_name: str) -> str:
     except ZoneInfoNotFoundError:
         timezone = ZoneInfo(DEFAULT_TIMEZONE)
 
-    return datetime.now(timezone).strftime("%Y-%m-%d %I:%M %p %Z")
+    current = datetime.now(timezone)
+    return f"{current:%Y-%m-%d} {current.hour % 12 or 12}:{current:%M %p %Z}"
 
 
 def build_payload(facts: dict[str, object], timezone_name: str) -> dict[str, object]:

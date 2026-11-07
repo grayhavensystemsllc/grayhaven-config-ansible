@@ -1,4 +1,4 @@
 ---
 - name: Enforce production observability
   ansible.builtin.include_tasks: production.yml
-  when: baseline_validation_environment == "prod"
+  when: grayhaven_environment == "prod"

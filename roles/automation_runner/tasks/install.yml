@@ -9,8 +9,8 @@
   when: grayhaven_role == "bastion"
 
 - name: Install bastion runner service unit
-  ansible.builtin.copy:
-    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-runner.service"
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-runner.service.j2"
     dest: /etc/systemd/system/grayhaven-ansible-runner.service
     owner: root
     group: root
@@ -18,8 +18,8 @@
   when: grayhaven_role == "bastion"
 
 - name: Install bastion runner timer unit
-  ansible.builtin.copy:
-    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-runner.timer"
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-runner.timer.j2"
     dest: /etc/systemd/system/grayhaven-ansible-runner.timer
     owner: root
     group: root
@@ -46,8 +46,8 @@
   when: grayhaven_role == "bastion"
 
 - name: Install bastion poller timer unit
-  ansible.builtin.copy:
-    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-poller.timer"
+  ansible.builtin.template:
+    src: "{{ playbook_dir | dirname }}/files/systemd/grayhaven-ansible-poller.timer.j2"
     dest: /etc/systemd/system/grayhaven-ansible-poller.timer
     owner: root
     group: root

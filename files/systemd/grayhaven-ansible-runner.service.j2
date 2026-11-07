@@ -1,0 +1,14 @@
+[Unit]
+Description=Grayhaven Systems LLC Ansible full playbook runner
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ansible
+Group=ansible
+WorkingDirectory=/home/ansible/ansible-runner
+ExecStart=/usr/local/sbin/grayhaven-ansible-runner
+# Keep convergence near or below 70% total CPU on the bastion.
+CPUAccounting=yes
+CPUQuota={{ automation_runner_cpu_quota_percent }}%

@@ -18,16 +18,20 @@ ANSIBLE_CONTROL_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/id_ed25519"
 VAULT_DEPLOY_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/grayhaven_vault_deploy_key"
 GITHUB_KNOWN_HOSTS="${ANSIBLE_HOME}/.ssh/github_known_hosts"
 INVENTORY_KNOWN_HOSTS="${ANSIBLE_HOME}/.ssh/known_hosts"
+INVENTORY_GLOBAL_KNOWN_HOSTS="/etc/ssh/ssh_known_hosts"
 GITHUB_META_URL="https://api.github.com/meta"
 ANSIBLE_RUNTIME_VENV="${ANSIBLE_HOME}/ansible-runner/ansible-runtime"
 ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_HOME}/.ansible/collections"
 ANSIBLE_RUNTIME_REQUIREMENTS_MARKER="${ANSIBLE_RUNTIME_VENV}/.grayhaven-pip3-requirements.sha256"
 ANSIBLE_GALAXY_REQUIREMENTS_MARKER="${ANSIBLE_COLLECTIONS_PATH}/.grayhaven-galaxy-requirements.sha256"
 CHECKOUT_PARENT="${ANSIBLE_HOME}"
-DEFAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-config-ansible"
-DEFAULT_VAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-vault"
-DEFAULT_REPO_URL="https://github.com/grayhavensystemsllc/grayhaven-config-ansible.git"
-DEFAULT_REPO_REF="main"
+# Repository settings are populated by the required runner environment file.
+REPO_URL=""
+REPO_REF=""
+CHECKOUT_DIR=""
+VAULT_REPO_URL=""
+VAULT_REPO_REF=""
+VAULT_CHECKOUT_DIR=""
 ANSIBLE_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible"
 ANSIBLE_GALAXY_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-galaxy"
 ANSIBLE_INVENTORY_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-inventory"
@@ -208,7 +212,7 @@ cleanup_runtime_files() {
 }
 
 grafana_cloud_enabled() {
-  local config_file="${VAULT_CHECKOUT_DIR:-}/config.yml"
+  local config_file="${VAULT_CHECKOUT_DIR:-}/grafana/observability.yml"
 
   [[ -f "$config_file" ]] || return 1
 
@@ -369,7 +373,10 @@ send_failure_notification() {
   fi
 
   DISCORD_TARGET="$failed_targets"
-  DISCORD_TIMESTAMP="$(TZ="${MANAGED_BASELINE_TIMEZONE:-America/Chicago}" date '+%Y-%m-%d %I:%M %p %Z')"
+  if [[ -n "${MANAGED_BASELINE_TIMEZONE:-}" ]]; then
+    export TZ="$MANAGED_BASELINE_TIMEZONE"
+  fi
+  DISCORD_TIMESTAMP="$(date '+%Y-%m-%d %-I:%M %p %Z')"
   export DISCORD_TARGET DISCORD_TIMESTAMP
 
   /usr/bin/python3 - <<'PY' | curl --fail --silent --show-error --retry 3 --retry-max-time 300 \
@@ -505,11 +512,6 @@ prepare_inventory_known_hosts() {
   local key_type
   local key_body
 
-  if [[ ! -f "$INVENTORY_KNOWN_HOSTS" ]]; then
-    log "Temporary inventory known-hosts bridge is absent; using managed global SSH known hosts."
-    return 0
-  fi
-
   inventory_json="$(mktemp)"
   run_as_ansible "$ANSIBLE_INVENTORY_BIN" \
     --inventory "${CHECKOUT_DIR}/inventory" \
@@ -559,6 +561,11 @@ PY
 
   while IFS=$'\t' read -r host_alias ssh_target; do
     [[ -n "$host_alias" && -n "$ssh_target" ]] || continue
+
+    # Existing trusted keys remain authoritative; scan only newly added targets.
+    if ssh-keygen -F "$ssh_target" -f "$INVENTORY_GLOBAL_KNOWN_HOSTS" >/dev/null 2>&1; then
+      continue
+    fi
 
     scan_output="$(ssh-keyscan -T 5 -t ed25519 "$ssh_target" 2>/dev/null)"
     if [[ -z "$scan_output" ]]; then
@@ -675,6 +682,10 @@ vault_password_file = sys.argv[2]
 
 with open(os.path.join(vault_checkout_dir, "config.yml"), encoding="utf-8") as config_file:
     config = yaml.safe_load(config_file) or {}
+with open(os.path.join(vault_checkout_dir, "server_configuration.yml"), encoding="utf-8") as server_file:
+    server_configuration = yaml.safe_load(server_file)
+with open(os.path.join(vault_checkout_dir, "ansible.yml"), encoding="utf-8") as automation_file:
+    automation = yaml.safe_load(automation_file)["ansible"]
 
 result = subprocess.run(
     [
@@ -690,12 +701,12 @@ result = subprocess.run(
 )
 bastion = yaml.safe_load(io.StringIO(result.stdout)) or {}
 
-selector = config.get("discord_webhook")
+selector = automation["notifications"]["environment"]
 webhooks = bastion.get("discord_webhooks", {})
 webhook_url = webhooks.get(selector)
 
 if not webhook_url:
-    raise SystemExit(f"discord_webhook selector {selector!r} does not match a configured webhook")
+    raise SystemExit("The notification environment does not match a configured webhook")
 
 certificate = config.get("certificate") or {}
 if not isinstance(certificate, dict):
@@ -709,7 +720,7 @@ certificate_email = certificate.get("email")
 if not certificate_email:
     raise SystemExit("certificate.email is required")
 
-network = config.get("network") or {}
+network = server_configuration["network"]
 if not isinstance(network, dict):
     raise SystemExit("network must be a mapping")
 
@@ -813,22 +824,18 @@ render_runner_vars() {
 import json
 import os
 
+import yaml
+
+with open(os.path.join(os.environ["VAULT_CHECKOUT_DIR"], "policy", "infrastructure.yml"), encoding="utf-8") as source:
+    infrastructure = yaml.safe_load(source)
+
 vars_to_render = {
-    "automation_runner_config_repo_ref": os.environ["REPO_REF"],
-    "automation_runner_vault_repo_url": os.environ["VAULT_REPO_URL"],
-    "baseline_validation_vault_checkout_dir": os.environ["VAULT_CHECKOUT_DIR"],
-    "baseline_validation_environment": os.environ["GRAYHAVEN_ENVIRONMENT"],
-    "baseline_validation_certificate_environment": os.environ["GRAYHAVEN_CERTIFICATE_ENVIRONMENT"],
-    "managed_inventory_network_vpc_cidr": os.environ["GRAYHAVEN_NETWORK_VPC_CIDR"],
-    "baseline_validation_tls_mode": os.environ["GRAYHAVEN_TLS_MODE"],
+    "infrastructure": infrastructure,
+    "grayhaven_config_repo_ref": os.environ["REPO_REF"],
+    "grayhaven_environment": os.environ["GRAYHAVEN_ENVIRONMENT"],
+    "grayhaven_tls_mode": os.environ["GRAYHAVEN_TLS_MODE"],
     "automation_notifications_discord_webhook_id": os.environ["DISCORD_WEBHOOK_ID"],
     "automation_notifications_discord_webhook_token": os.environ["DISCORD_WEBHOOK_TOKEN"],
-    "automation_notifications_environment": os.environ["GRAYHAVEN_ENVIRONMENT"],
-    "deploy_websites_environment": os.environ["GRAYHAVEN_ENVIRONMENT"],
-    "deploy_websites_certbot_email": os.environ["GRAYHAVEN_CERTIFICATE_EMAIL"],
-    "deploy_websites_certificate_environment": os.environ["GRAYHAVEN_CERTIFICATE_ENVIRONMENT"],
-    "deploy_websites_tls_mode": os.environ["GRAYHAVEN_TLS_MODE"],
-    "managed_inventory_fallback_vpc_cidr": os.environ["GRAYHAVEN_NETWORK_VPC_CIDR"],
 }
 
 for key, value in vars_to_render.items():
@@ -850,10 +857,10 @@ prepare_runner_runtime() {
   # shellcheck disable=SC1090
   source "$RUNNER_ENV"
 
-  REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
-  REPO_REF="${REPO_REF:-$DEFAULT_REPO_REF}"
-  CHECKOUT_DIR="${CHECKOUT_DIR:-$DEFAULT_CHECKOUT_DIR}"
-  VAULT_CHECKOUT_DIR="${VAULT_CHECKOUT_DIR:-$DEFAULT_VAULT_CHECKOUT_DIR}"
+  require_env REPO_REF
+  require_env CHECKOUT_DIR
+  require_env VAULT_CHECKOUT_DIR
+  require_env REPO_URL
   require_env VAULT_REPO_URL
   require_env VAULT_REPO_REF
   require_env GRAYHAVEN_ENVIRONMENT
@@ -918,12 +925,17 @@ run_convergence() {
     --inventory "${CHECKOUT_DIR}/inventory" \
     "${CHECKOUT_DIR}/playbooks/site.yml" \
     --vault-password-file "$VAULT_PASSWORD_FILE" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/server_configuration.yml" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/ansible.yml" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/grafana/observability.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/config.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/common.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/bastion.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/web.yml" \
     "${mcp_vars[@]}" \
-    --extra-vars "@${RUNNER_VARS}" 2>&1 | tee "$RUNNER_PLAYBOOK_LOG" | write_ordered_runner_log
+    --extra-vars "@${RUNNER_VARS}" 2>&1 \
+    | /usr/bin/python3 "${CHECKOUT_DIR}/files/grayhaven-redact-output" \
+    | tee "$RUNNER_PLAYBOOK_LOG" | write_ordered_runner_log
 }
 
 run_gcs_restic_bucket_cleanup() {
@@ -940,6 +952,9 @@ run_gcs_restic_bucket_cleanup() {
     --inventory "${CHECKOUT_DIR}/inventory" \
     "${CHECKOUT_DIR}/playbooks/cleanup-gcs-restic-buckets.yml" \
     --vault-password-file "$VAULT_PASSWORD_FILE" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/server_configuration.yml" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/ansible.yml" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/grafana/observability.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/config.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/common.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/bastion.yml" \

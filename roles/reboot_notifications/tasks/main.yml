@@ -19,6 +19,7 @@
     owner: root
     group: root
     mode: "0700"
+  no_log: true
 
 - name: Install local Discord webhook config
   ansible.builtin.copy:
@@ -31,7 +32,7 @@
         {
           'webhook_id': automation_notifications_discord_webhook_id,
           'webhook_token': automation_notifications_discord_webhook_token,
-          'timezone': baseline_validation_timezone,
+          'timezone': timezone,
         }
         | to_nice_json
       }}

@@ -12,11 +12,13 @@
 
 - name: Install Grafana Cloud alert UID registry
   ansible.builtin.copy:
-    src: grafana-alert-rule-uids.json
     dest: "{{ observability_alert_uid_registry_file }}"
     owner: root
     group: root
     mode: "0644"
+    content: >-
+      {{ lookup('file', grayhaven_vault_checkout_dir ~ '/grafana/grafana-alert-rule-uids.yml')
+         | from_yaml | to_nice_json }}
   when:
     - observability_metrics_enabled
     - observability_host_is_control_node
@@ -29,36 +31,22 @@
     mode: "0600"
     content: "{{ observability_alert_sync_config | to_nice_json }}\n"
   vars:
-    observability_alerting_config: "{{ observability_grafana_credentials.alerting | default({}) }}"
+    observability_alerting_config: "{{ observability_grafana_credentials.alerting }}"
     observability_alert_sync_config:
       uid_registry_file: "{{ observability_alert_uid_registry_file }}"
+      rule_definitions_base64: >-
+        {{ lookup('file', grayhaven_vault_checkout_dir ~ '/grafana/grafana-alert-rules.yml') | b64encode }}
       grafana:
         stack_url: "{{ observability_grafana_credentials.stack_url }}"
         api_token: "{{ observability_alerting_config.api_token }}"
-        folder: >-
-          {{
-            observability_alerting_config.folder
-            | default(observability_grafana_default_folder)
-          }}
-        evaluation_group: >-
-          {{
-            observability_alerting_config.evaluation_group
-            | default(observability_grafana_default_evaluation_group)
-          }}
-        evaluation_interval: >-
-          {{
-            observability_alerting_config.evaluation_interval
-            | default(observability_grafana_default_evaluation_interval)
-          }}
-        contact_point: >-
-          {{
-            observability_alerting_config.contact_point
-            | default(observability_grafana_default_contact_point)
-          }}
+        folder: "{{ observability_alerting_config.folder }}"
+        evaluation_group: "{{ observability_alerting_config.evaluation_group }}"
+        evaluation_interval: "{{ observability_alerting_config.evaluation_interval }}"
+        contact_point: "{{ observability_alerting_config.contact_point }}"
         prometheus_datasource_name: "{{ observability_grafana_credentials.prometheus.datasource_name }}"
       labels:
         client: "{{ observability_client }}"
-        environment: "{{ baseline_validation_environment }}"
+        environment: "{{ grayhaven_environment }}"
       thresholds:
         cpu_percent: "{{ observability_cpu_warning_percent }}"
         memory_percent: "{{ observability_memory_warning_percent }}"
@@ -75,7 +63,8 @@
           {{ observability_google_monitoring_monthly_warning_series }}
         gcs_class_a_monthly_warning_operations: "{{ observability_gcs_class_a_monthly_warning_operations }}"
         gcs_class_b_monthly_warning_operations: "{{ observability_gcs_class_b_monthly_warning_operations }}"
-      tls_mode: "{{ baseline_validation_tls_mode }}"
+      tls_mode: "{{ grayhaven_tls_mode }}"
+      process_containers: "{{ observability_process_containers }}"
       hosts: "{{ observability_hosts }}"
       sites: "{{ observability_web_sites }}"
       public_status: "{{ observability_public_status_services }}"

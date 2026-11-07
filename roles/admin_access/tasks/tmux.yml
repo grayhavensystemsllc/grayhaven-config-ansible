@@ -86,6 +86,7 @@
   loop_control:
     label: "{{ item.username }}"
   when: grayhaven_role == "bastion"
+  no_log: true
 
 - name: Derive sudo managed users with tmux auto-attach enabled
   ansible.builtin.set_fact:
@@ -96,6 +97,7 @@
         | selectattr('tmux_auto_attach')
         | list
       }}
+  no_log: true
 
 - name: Install tmux auto-attach helper for opted-in sudo managed users on bastions
   ansible.builtin.template:
@@ -108,6 +110,7 @@
   loop_control:
     label: "{{ item.username }}"
   when: grayhaven_role == "bastion"
+  no_log: true
 
 - name: Remove tmux auto-attach helper for sudo managed users without opt-in on bastions
   ansible.builtin.file:
@@ -119,3 +122,4 @@
   when:
     - grayhaven_role == "bastion"
     - not (item.tmux_auto_attach | default(false) | bool)
+  no_log: true

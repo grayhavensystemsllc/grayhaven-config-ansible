@@ -1,0 +1,7 @@
+---
+automation_runner_checkout_dir: "{{ grayhaven_config_checkout_dir }}"
+automation_runner_repo_url: "{{ infrastructure.repositories.config }}"
+automation_runner_workspace_dir: "{{ grayhaven_runner_workspace_dir }}"
+automation_runner_schedule: "{{ ansible.runner.schedule }}"
+automation_runner_poller_schedule: "{{ ansible.poller.schedule }}"
+automation_runner_cpu_quota_percent: "{{ ansible.runner.cpu_quota_percent }}"

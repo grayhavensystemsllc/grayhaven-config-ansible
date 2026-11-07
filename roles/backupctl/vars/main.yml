@@ -1,0 +1,5 @@
+---
+backupctl_state_dir: /var/lib/grayhaven/backupctl
+backupctl_venv_dir: /opt/grayhaven/grayhaven-backupctl-venv
+backupctl_libexec_dir: /usr/local/libexec/grayhaven-backupctl
+backupctl_command_path: /usr/local/sbin/grayhaven-backupctl

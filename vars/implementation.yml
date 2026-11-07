@@ -1,0 +1,4 @@
+---
+grayhaven_vault_checkout_dir: /home/ansible/grayhaven-vault
+grayhaven_config_checkout_dir: /home/ansible/grayhaven-config-ansible
+grayhaven_runner_workspace_dir: /home/ansible/ansible-runner

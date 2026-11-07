@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll Grayhaven Systems LLC Ansible repositories for changes
+
+[Timer]
+OnCalendar={{ automation_runner_poller_schedule }}
+RandomizedDelaySec=30s
+Persistent=true
+Unit=grayhaven-ansible-poller.service
+
+[Install]
+WantedBy=timers.target

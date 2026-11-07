@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import pathlib
+import re
 import tempfile
 import time
 from typing import Any
@@ -136,9 +137,23 @@ def expected_bucket_names(hosts: list[dict[str, Any]]) -> set[str]:
     return {f"{host['short_hostname']}-restic" for host in hosts}
 
 
-def bucket_host_fqdn(bucket_name: str, environment: str) -> str:
+def bucket_host_fqdn(bucket_name: str, inventory_fqdn: str) -> str:
+    if not isinstance(inventory_fqdn, str):
+        raise ValueError("Inventory FQDN is required")
+    hostname = inventory_fqdn.removesuffix(".")
+    parts = hostname.split(".")
+    if (
+        len(parts) < 2
+        or len(hostname) > 253
+        or all(part.isdigit() for part in parts)
+        or any(
+            not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
+            for part in parts
+        )
+    ):
+        raise ValueError("Inventory FQDN is invalid")
     short_hostname = bucket_name.removesuffix("-restic")
-    domain = "staging.grayhavensystems.com" if environment == "staging" else "grayhavensystems.com"
+    domain = ".".join(parts[1:])
     return f"{short_hostname}.{domain}"
 
 
@@ -209,7 +224,7 @@ def render_metrics(config: dict[str, Any]) -> list[str]:
     for bucket_name in stale_buckets:
         stale_labels = dict(metric_base)
         stale_labels["bucket"] = bucket_name
-        stale_labels["host"] = bucket_host_fqdn(bucket_name, str(current_host["environment"]))
+        stale_labels["host"] = bucket_host_fqdn(bucket_name, current_host["fqdn"])
         output.append(line("grayhaven_gcs_restic_stale_bucket_info", stale_labels, 1))
 
     return output

@@ -1,0 +1,3 @@
+---
+admin_access_vault_checkout_dir: "{{ grayhaven_vault_checkout_dir }}"
+admin_access_tmux_workspace_dir: "{{ grayhaven_vault_checkout_dir ~ '/files/tmux-workspaces' }}"

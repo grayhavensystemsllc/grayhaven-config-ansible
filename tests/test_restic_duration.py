@@ -14,8 +14,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-import yaml
-
 from tests.helpers import REPO_ROOT, load_program
 
 
@@ -40,7 +38,9 @@ class ResticDurationTests(unittest.TestCase):
                     mock.patch.object(
                         duration.time, "monotonic_ns", return_value=start + elapsed
                     ),
-                    mock.patch.object(duration.time, "time_ns", side_effect=AssertionError),
+                    mock.patch.object(
+                        duration.time, "time_ns", side_effect=AssertionError
+                    ),
                 ):
                     self.assertEqual(duration.elapsed_seconds(start), expected)
 
@@ -57,7 +57,9 @@ class ResticDurationTests(unittest.TestCase):
         for args, expected in (([], "1739243000"), (["1000000000"], "0.739243000")):
             output = io.StringIO()
             with (
-                mock.patch.object(duration.time, "monotonic_ns", return_value=1_739_243_000),
+                mock.patch.object(
+                    duration.time, "monotonic_ns", return_value=1_739_243_000
+                ),
                 contextlib.redirect_stdout(output),
             ):
                 self.assertEqual(duration.main(args), 0)
@@ -83,15 +85,11 @@ class ResticDurationTests(unittest.TestCase):
 class ResticScriptDurationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        tasks = yaml.safe_load(
-            (REPO_ROOT / "roles/restic_backup/tasks/local.yml").read_text()
-        )
         cls.programs = {
-            task["ansible.builtin.copy"]["dest"].rsplit("/", 1)[-1]: task[
-                "ansible.builtin.copy"
-            ]["content"]
-            for task in tasks
-            if "content" in task.get("ansible.builtin.copy", {})
+            name: (
+                REPO_ROOT / "roles/restic_backup/templates" / (name + ".j2")
+            ).read_text()
+            for name in ("grayhaven-restic-backup", "grayhaven-restic-check")
         }
 
     def run_function(self, kind, label="local", failure=""):
@@ -150,7 +148,10 @@ restic() {
   return 8
 }
 """
-            script += source + f"\n{kind}_repository /fixture/repository {shlex.quote(label)}\n"
+            script += (
+                source
+                + f"\n{kind}_repository /fixture/repository {shlex.quote(label)}\n"
+            )
             script += (
                 'printf "%s|%s|%s|%s\\n" '
                 f'"${{repository_{kind}_duration_seconds[{label}]}}" '
@@ -216,16 +217,10 @@ restic() {
                     self.assertEqual(result.stdout, "")
                     self.assertEqual(calls[-1], failure)
 
-
     def test_backup_snapshot_is_required_and_failed_output_is_not_published(self):
-        tasks = yaml.safe_load(
-            (REPO_ROOT / "roles/restic_backup/tasks/local.yml").read_text()
-        )
-        script = next(
-            t["ansible.builtin.copy"]["content"]
-            for t in tasks
-            if t.get("name") == "Install local restic backup script"
-        )
+        script = (
+            REPO_ROOT / "roles/restic_backup/templates/grayhaven-restic-backup.j2"
+        ).read_text()
         functions = script[
             script.index("create_mcp_backup() {") : script.index(
                 "create_timetracker_backup() {"
@@ -276,6 +271,7 @@ restic() {
                 )
                 if files:
                     self.assertEqual(files[0].read_text(), "encrypted fixture")
+
 
 if __name__ == "__main__":
     unittest.main()

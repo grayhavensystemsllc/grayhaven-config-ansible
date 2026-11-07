@@ -14,11 +14,11 @@ PublishPort=127.0.0.1:{{ mcp_host_port }}:{{ mcp_host_port }}
 Volume={{ directory }}:{{ directory }}:Z
 {% endfor %}
 Environment=GRAYHAVEN_MCP_CONFIG={{ mcp.config_dir }}/config.json
-Environment=GRAYHAVEN_MCP_ENVIRONMENT={{ 'production' if baseline_validation_environment in ['prod', 'production'] else 'staging' }}
-Environment=TZ={{ baseline_validation_timezone }}
+Environment=GRAYHAVEN_MCP_ENVIRONMENT={{ 'production' if grayhaven_environment in ['prod', 'production'] else 'staging' }}
+Environment=TZ={{ timezone }}
 DropCapability=all
 NoNewPrivileges=true
-PidsLimit=256
+PidsLimit={{ mcp_pids_limit }}
 RunInit=true
 ReadOnly=true
 Tmpfs=/tmp:rw,nosuid,nodev,size=128m

@@ -75,7 +75,7 @@
               {{ (gcs_cleanup_tempdir.path ~ '/grayhaven-gcs-restic-bucket-cleanup') | quote }}
               --credentials-file {{ (gcs_cleanup_tempdir.path ~ '/credentials.json') | quote }}
               --project-id {{ backup.repositories.remote.project_id | quote }}
-              --client {{ backup.repositories.remote.client | default('grayhaven') | quote }}
+              --client {{ backup.repositories.remote.client | default(infrastructure.identity.client_name) | quote }}
               --environment {{ grayhaven_environment | quote }}
               --inventory-file {{ (gcs_cleanup_tempdir.path ~ '/inventory.json') | quote }}
               {{ '--execute' if confirm_delete_remote_backup_buckets else '' }}
@@ -83,6 +83,7 @@
           changed_when:
             - confirm_delete_remote_backup_buckets | bool
             - "'deleted=' in gcs_cleanup_result.stdout"
+          no_log: true
 
         - name: Show GCS restic bucket cleanup result
           ansible.builtin.debug:

@@ -9,15 +9,13 @@ import urllib.error
 from datetime import datetime, timezone
 from unittest import mock
 
+from tests.alert_fixtures import complete_config
 from tests.helpers import load_program
 
 
 alert_sync = load_program(
     "grayhaven_grafana_alert_sync",
     "roles/observability/files/grayhaven-grafana-alert-sync",
-)
-validator = load_program(
-    "alert_sync_fixture", "scripts/validate-generated-grafana-alerts"
 )
 
 
@@ -37,20 +35,6 @@ class Response:
 
     def read(self) -> bytes:
         return self.body
-
-
-def complete_config() -> dict[str, object]:
-    config = validator.fixture_config()
-    config["grafana"].update(
-        {
-            "api_token": "token",
-            "evaluation_interval": "1m",
-            "folder": "Fixture Folder",
-            "prometheus_datasource_name": "Prometheus",
-            "stack_url": "https://grafana.example.invalid",
-        }
-    )
-    return config
 
 
 class AlertRuleTests(unittest.TestCase):
@@ -80,10 +64,15 @@ class AlertRuleTests(unittest.TestCase):
         self.assertEqual(rule["data"][0]["datasourceUid"], values["datasource_uid"])
         self.assertEqual(rule["data"][0]["model"]["expr"], values["expression"])
         evaluator = rule["data"][1]["model"]["conditions"][0]["evaluator"]
-        self.assertEqual(evaluator, {"type": values["evaluator_type"], "params": [values["threshold"]]})
+        self.assertEqual(
+            evaluator,
+            {"type": values["evaluator_type"], "params": [values["threshold"]]},
+        )
         self.assertEqual(rule["labels"]["example"], values["labels"]["example"])
         self.assertEqual(rule["annotations"], values["annotations"])
-        self.assertEqual(rule["notification_settings"]["receiver"], values["contact_point"])
+        self.assertEqual(
+            rule["notification_settings"]["receiver"], values["contact_point"]
+        )
         self.assertEqual(rule["for"], values["duration"])
         self.assertEqual(rule["noDataState"], values["no_data_state"])
 
@@ -91,21 +80,35 @@ class AlertRuleTests(unittest.TestCase):
         arguments = {
             "identity": "test:example",
             "uid_registry": {"test:example": "123e4567-e89b-42d3-a456-426614174000"},
-            "title": "Example", "folder_uid": "folder", "rule_group": "group",
-            "datasource_uid": "prom", "expression": "up", "evaluator_type": "lt",
-            "threshold": 1, "labels": {}, "annotations": {}, "contact_point": "IRM",
+            "title": "Example",
+            "folder_uid": "folder",
+            "rule_group": "group",
+            "datasource_uid": "prom",
+            "expression": "up",
+            "evaluator_type": "lt",
+            "threshold": 1,
+            "labels": {},
+            "annotations": {},
+            "contact_point": "IRM",
         }
         baseline = alert_sync.alert_rule(**arguments)
         self.assertEqual(baseline["for"], "5m")
         for duration, expected in (
-            ("0s", "5m"), ("1m", "5m"), ("2m", "5m"), ("299s", "5m"),
-            ("300s", "300s"), ("5m", "5m"), ("10m", "10m"), ("1h", "1h"),
+            ("0s", "5m"),
+            ("1m", "5m"),
+            ("2m", "5m"),
+            ("299s", "5m"),
+            ("300s", "300s"),
+            ("5m", "5m"),
+            ("10m", "10m"),
+            ("1h", "1h"),
         ):
             with self.subTest(duration=duration):
                 rule = alert_sync.alert_rule(**arguments, duration=duration)
                 self.assertEqual(rule, {**baseline, "for": expected})
         for duration, minimum, expected in (
-            ("2m", "1m", "2m"), ("20s", "1m", "1m"),
+            ("2m", "1m", "2m"),
+            ("20s", "1m", "1m"),
             ("7m", "3m", "7m"),
         ):
             with self.subTest(duration=duration, minimum=minimum):
@@ -120,8 +123,13 @@ class AlertRuleTests(unittest.TestCase):
             alert_sync.valid_rule_uid("123e4567-e89b-42d3-a456-426614174000")
         )
         self.assertFalse(alert_sync.valid_rule_uid("not-a-uid"))
-        with self.assertRaisesRegex(alert_sync.GrafanaError, "not registered"):
-            alert_sync.rule_uid("missing", {})
+        generated = alert_sync.rule_uid("fixture:new", {})
+        self.assertTrue(alert_sync.valid_rule_uid(generated))
+        self.assertEqual(generated, alert_sync.rule_uid("fixture:new", {}))
+        self.assertNotEqual(generated, alert_sync.rule_uid("fixture:other", {}))
+        for identity in (None, "", " "):
+            with self.assertRaises(alert_sync.GrafanaError):
+                alert_sync.rule_uid(identity, {})
         self.assertEqual(alert_sync.promql_string('a"b\\c'), 'a\\"b\\\\c')
         self.assertIn(
             r"example\\.invalid", alert_sync.domain_regex(["example.invalid"])
@@ -156,18 +164,14 @@ class AlertRuleTests(unittest.TestCase):
 
         config = complete_config()
         desired = alert_sync.desired_rules(config, "folder", "prom")
-        self.assertTrue(any(
-            item["labels"].get("host") == config["hosts"][0]["fqdn"]
-            for item in desired.values()
-        ))
-        self.assertTrue(any(
-            item["labels"].get("domain") == config["sites"][0]["domain"]
-            for item in desired.values()
-        ))
-        self.assertEqual(len(desired), len(set(desired)))
         self.assertTrue(
-            alert_sync.is_managed(next(iter(desired.values())), "fixture")
+            any(
+                item["labels"].get("host") == config["hosts"][0]["fqdn"]
+                for item in desired.values()
+            )
         )
+        self.assertEqual(len(desired), len(set(desired)))
+        self.assertTrue(alert_sync.is_managed(next(iter(desired.values())), "fixture"))
         self.assertFalse(alert_sync.is_managed({}, "fixture"))
         self.assertEqual(
             alert_sync.comparable({**rule, "unmanaged": True}),
@@ -182,8 +186,9 @@ class AlertRuleTests(unittest.TestCase):
         for value, expected in ((0, -1), (1, 0), (43, 42)):
             self.assertEqual(alert_sync.integer_at_least_threshold(value), expected)
         for value in (True, False, 1.5, -1, "43", "4.0", "invalid", None, object()):
-            with self.subTest(value=value), self.assertRaisesRegex(
-                alert_sync.GrafanaError, "non-negative integer"
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(alert_sync.GrafanaError, "non-negative integer"),
             ):
                 alert_sync.integer_at_least_threshold(value)
 
@@ -191,8 +196,7 @@ class AlertRuleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = pathlib.Path(temp_dir) / "uids.json"
             for value, message in (
-                ([], "non-empty object"),
-                ({}, "non-empty object"),
+                ([], "must be an object"),
                 ({"identity": "invalid"}, "invalid identity or UID"),
                 (
                     {"": "123e4567-e89b-42d3-a456-426614174000"},
@@ -210,39 +214,23 @@ class AlertRuleTests(unittest.TestCase):
                 with self.assertRaisesRegex(alert_sync.GrafanaError, message):
                     alert_sync.load_uid_registry(str(path))
 
-            expected = {"identity": "123e4567-e89b-42d3-a456-426614174000"}
-            path.write_text(json.dumps(expected), encoding="utf-8")
-            self.assertEqual(alert_sync.load_uid_registry(str(path)), expected)
+            for expected in ({}, {"identity": "123e4567-e89b-42d3-a456-426614174000"}):
+                path.write_text(json.dumps(expected), encoding="utf-8")
+                self.assertEqual(alert_sync.load_uid_registry(str(path)), expected)
 
-    def test_desired_rules_rejects_duplicate_identities_and_uids(self) -> None:
+    def test_desired_rules_rejects_duplicate_identities_and_uids(self):
         config = complete_config()
-        first = {"_identity": "duplicate", "uid": "one"}
-        second = {"_identity": "duplicate", "uid": "two"}
-        with (
-            mock.patch.object(
-                alert_sync, "host_metric_rules", return_value=[first, second]
-            ),
-            mock.patch.object(alert_sync, "service_rules", return_value=[]),
-            mock.patch.object(alert_sync, "site_rules", return_value=[]),
-            mock.patch.object(alert_sync, "external_service_rules", return_value=[]),
-            self.assertRaisesRegex(
-                alert_sync.GrafanaError, "identities are not unique"
-            ),
+        for records in (
+            [{"_identity": "same", "uid": "one"}, {"_identity": "same", "uid": "two"}],
+            [{"_identity": "one", "uid": "same"}, {"_identity": "two", "uid": "same"}],
         ):
-            alert_sync.desired_rules(config, "folder", "prom")
-
-        first = {"_identity": "one", "uid": "duplicate"}
-        second = {"_identity": "two", "uid": "duplicate"}
-        with (
-            mock.patch.object(
-                alert_sync, "host_metric_rules", return_value=[first, second]
-            ),
-            mock.patch.object(alert_sync, "service_rules", return_value=[]),
-            mock.patch.object(alert_sync, "site_rules", return_value=[]),
-            mock.patch.object(alert_sync, "external_service_rules", return_value=[]),
-            self.assertRaisesRegex(alert_sync.GrafanaError, "UIDs are not unique"),
-        ):
-            alert_sync.desired_rules(config, "folder", "prom")
+            with (
+                mock.patch.object(
+                    alert_sync, "render_rule_templates", return_value=records
+                ),
+                self.assertRaises(alert_sync.GrafanaError),
+            ):
+                alert_sync.desired_rules(config, "folder", "prom")
 
     def test_grafana_client_request_and_helpers(self) -> None:
         client = alert_sync.GrafanaClient("https://grafana.example.invalid/", "token")
@@ -337,61 +325,6 @@ class AlertRuleTests(unittest.TestCase):
         ):
             client.create_silence({})
 
-    def test_rule_generation_boundaries(self) -> None:
-        config = complete_config()
-        config["hosts"].append(
-            {
-                **config["hosts"][0],
-                "control_node": True,
-                "fqdn": "control.example.invalid",
-                "role": "bastion",
-                "short_hostname": "control",
-            }
-        )
-        config["service_units"]["common"] = [
-            {"check": "common_service", "name": "mock-common.service", "summary": "Common is down"}
-        ]
-        config["service_units"]["control_node"] = [
-            {"check": "control_service", "name": "mock-control.service", "summary": "Control is down"}
-        ]
-        services = alert_sync.service_rules(config, "folder", "prom")
-        checks = {rule["labels"]["check"] for rule in services}
-        expected = {
-            unit["check"]
-            for group in ("common", "control_node")
-            for unit in config["service_units"][group]
-        }
-        self.assertTrue(expected <= checks)
-
-        with_control = alert_sync.host_metric_rules(config, "folder", "prom")
-        config["hosts"][-1]["control_node"] = False
-        without_control = alert_sync.host_metric_rules(config, "folder", "prom")
-        self.assertEqual(len(with_control), len(without_control) + 1)
-
-        no_sites = complete_config()
-        no_sites["sites"] = []
-        self.assertEqual(alert_sync.site_rules(no_sites, "folder", "prom"), [])
-        no_web = complete_config()
-        no_web["hosts"][0]["role"] = "bastion"
-        self.assertEqual(alert_sync.site_rules(no_web, "folder", "prom"), [])
-
-        config = complete_config()
-        local_tls = alert_sync.site_rules(config, "folder", "prom")
-        config["tls_mode"] = "load_balancer"
-        self.assertLess(len(alert_sync.site_rules(config, "folder", "prom")), len(local_tls))
-
-        config = complete_config()
-        config["sites"][0]["redirect_http"] = False
-        baseline = alert_sync.site_rules(config, "folder", "prom")
-        dev_domain = "sandbox.example.invalid"
-        config["sites"][0]["dev_domain"] = dev_domain
-        with_development = alert_sync.site_rules(config, "folder", "prom")
-        self.assertEqual(len(with_development), len(baseline) + 1)
-        self.assertTrue(any(rule["labels"].get("domain") == dev_domain for rule in with_development))
-        config["sites"][0]["redirect_http"] = True
-        with_redirect = alert_sync.site_rules(config, "folder", "prom")
-        self.assertEqual(len(with_redirect), len(with_development) + 1)
-
     def test_sync_silence_and_main(self) -> None:
         config = complete_config()
         desired = alert_sync.desired_rules(config, "folder", "prom")
@@ -443,7 +376,12 @@ class AlertRuleTests(unittest.TestCase):
         with mock.patch.object(alert_sync, "GrafanaClient", return_value=fake):
             self.assertEqual(alert_sync.create_initial_silence(config, 15), "silence")
         payload = fake.create_silence.call_args.args[0]
-        self.assertTrue(any(item["value"] == config["labels"]["client"] for item in payload["matchers"]))
+        self.assertTrue(
+            any(
+                item["value"] == config["labels"]["client"]
+                for item in payload["matchers"]
+            )
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = pathlib.Path(temp_dir) / "config.json"

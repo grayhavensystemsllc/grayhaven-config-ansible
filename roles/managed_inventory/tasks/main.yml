@@ -2,10 +2,10 @@
 - name: Validate managed inventory variables
   ansible.builtin.assert:
     that:
-      - managed_inventory_fallback_vpc_cidr is string
-      - managed_inventory_fallback_vpc_cidr | trim | length > 0
+      - network.vpc_cidr is string
+      - network.vpc_cidr | trim | length > 0
       - >-
-        managed_inventory_fallback_vpc_cidr
+        network.vpc_cidr
         is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$')
     fail_msg: "network.vpc_cidr must be provided as a valid IPv4 CIDR block."
     quiet: true
@@ -75,7 +75,7 @@
     managed_inventory_web_ssh_sources: >-
       {{
         (
-          [managed_inventory_fallback_vpc_cidr]
+          [network.vpc_cidr]
           + managed_inventory_bastion_private_sources
         )
         | unique

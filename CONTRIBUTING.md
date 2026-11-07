@@ -27,9 +27,6 @@ npm install --global markdownlint-cli2
 scripts/install-galaxy-collections
 ```
 
-Install Grafana Alloy from the official Grafana package repository when working
-on observability templates. It is used for local configuration validation only;
-do not configure local metric or log shipping from a workstation.
 Install Prometheus `promtool` to run the alert behavior unit tests.
 
 The Python packages in `pip3_requirements.txt` are pinned with hashes and cover
@@ -52,7 +49,7 @@ then run the following to update `galaxy_requirements.sha256`:
 ```bash
 tmpdir="$(mktemp -d /tmp/grayhaven-galaxy.XXXXXX)"
 ansible-galaxy collection download \
-  --requirements-file galaxy_requirements.yml \
+  --requirements-file galaxy_requirements.yml
   --download-path "$tmpdir"
 (cd "$tmpdir" && sha256sum *.tar.gz | sort -k2) > galaxy_requirements.sha256
 rm -rf "$tmpdir"
@@ -93,25 +90,20 @@ ansible-lint .
 find playbooks -type f \( -name "*.yml" -o -name "*.yaml" \) -print0 \
   | xargs -0 -n1 ansible-playbook -i tests/fixtures/syntax-inventory.yml --connection=local --syntax-check
 shellcheck files/grayhaven-ansible-runner files/grayhaven-ansible-poller roles/admin_access/files/gtmux
-python3 -m ruff check files roles scripts tests
+python3 -m ruff check files roles scripts tests plugins
 python3 -m py_compile \
   files/grayhaven-gcs-restic-bucket-cleanup \
   files/grayhaven-reboot-notify \
   files/grayhaven-refresh-motd \
   files/grayhaven-ansible-automation-status \
+  files/grayhaven-redact-output \
   roles/deploy_websites/files/grayhaven-website-deploy \
   roles/restic_backup/files/grayhaven-restic-duration \
   roles/restic_backup/files/grayhaven-restic-workflow \
   roles/observability/files/grayhaven-grafana-alert-sync \
   roles/observability/files/grayhaven-irm-alert-groups-textfile \
   roles/observability/files/grayhaven-observability-textfile \
-  scripts/validate-generated-grafana-alerts \
-  scripts/validate-rendered-alloy-config \
-  scripts/validate-rendered-timetracker-config
-scripts/validate-rendered-alloy-config
-scripts/validate-rendered-alloy-config --role mcp
-scripts/validate-generated-grafana-alerts
-scripts/validate-rendered-timetracker-config
+  roles/observability/files/grayhaven-gcs-restic-stale-buckets
 python3 -m coverage run -m unittest discover -s tests -v
 python3 -m coverage report
 python3 -m coverage xml

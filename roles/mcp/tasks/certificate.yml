@@ -49,6 +49,7 @@
       or not mcp_certificate_marker_file.stat.exists
       or (mcp_certificate_marker.content | default('') | b64decode | trim)
       != 'production'
+  no_log: true
 
 - name: Record MCP certificate environment
   ansible.builtin.copy:

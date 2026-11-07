@@ -2,7 +2,7 @@
 ::1 localhost localhost.localdomain localhost6 localhost6.localdomain6
 
 {% for managed_host in managed_inventory_hosts | default([]) %}
-{% set use_loopback = grayhaven_role == 'bastion' and managed_host.fqdn == inventory_hostname %}
+{% set use_loopback = grayhaven_role == 'bastion' and managed_host.fqdn == (host_identity_local_inventory_name | default(inventory_hostname)) %}
 {% set host_ip = '127.0.0.1' if use_loopback else managed_host.private_ip %}
 {% if host_ip is defined and host_ip | string | length > 0 %}
 {{ host_ip }} {{ managed_host.host_alias }} {{ managed_host.host_alias }}.internal

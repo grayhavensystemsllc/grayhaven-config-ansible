@@ -63,8 +63,7 @@ def request(
                 time.sleep(delay)
                 continue
 
-            message = error.read().decode("utf-8", errors="replace")
-            raise CleanupError(f"{method} {path} failed with HTTP {error.code}: {message}") from error
+            raise CleanupError(f"{method} {path} failed with HTTP {error.code}") from error
 
         if status not in expected:
             raise CleanupError(f"{method} {path} returned unexpected HTTP status {status}")

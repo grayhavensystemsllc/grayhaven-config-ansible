@@ -19,7 +19,6 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_CONFIG_PATH = pathlib.Path("/etc/grayhaven/observability/irm-alert-groups.json")
 DEFAULT_STATES = ("new", "acknowledged", "silenced")
-DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
 STATE_SORT_ORDER = {
     "firing": "0",
     "new": "0",
@@ -73,8 +72,7 @@ class GrafanaIrmClient:
                     time.sleep(delay)
                     continue
 
-                message = error.read().decode("utf-8", errors="replace")
-                raise GrafanaIrmError(f"GET {url} failed with HTTP {error.code}: {message}") from error
+                raise GrafanaIrmError(f"GET {url} failed with HTTP {error.code}") from error
             except urllib.error.URLError as error:
                 if attempt < 4:
                     time.sleep(min(2**attempt, 30))
@@ -221,14 +219,14 @@ def alert_group_url(group: dict[str, Any]) -> str:
     return safe_string(permalinks.get("web"), max_length=512)
 
 
-def local_timestamp(timestamp: str) -> str:
+def local_timestamp(timestamp: str, timezone_name: str = "UTC") -> str:
     if not timestamp:
         return ""
 
     try:
         parsed = timestamp.replace("Z", "+00:00")
-        local_time = datetime.datetime.fromisoformat(parsed).astimezone(DISPLAY_TIMEZONE)
-    except ValueError:
+        local_time = datetime.datetime.fromisoformat(parsed).astimezone(ZoneInfo(timezone_name))
+    except (ValueError, KeyError):
         return ""
 
     hour = local_time.strftime("%I").lstrip("0") or "0"
@@ -264,6 +262,7 @@ def render(
     identities: IdentityResolver,
     details_by_id: dict[str, dict[str, Any]],
 ) -> str:
+    display_timezone = config.get("display_timezone", "UTC")
     metric_labels = {
         "client": config["labels"]["client"],
         "environment": config["labels"]["environment"],
@@ -313,9 +312,9 @@ def render(
                 "alert_group_number": group_label(group, "alert_group_number"),
                 "alert_group_url": alert_group_url(group),
                 "created_at": group_label(group, "created_at"),
-                "created_at_display": local_timestamp(group_label(group, "created_at")),
+                "created_at_display": local_timestamp(group_label(group, "created_at"), display_timezone),
                 "silenced_until": silenced_until,
-                "silenced_until_display": local_timestamp(silenced_until),
+                "silenced_until_display": local_timestamp(silenced_until, display_timezone),
                 "state": state_label,
                 "state_display": state_display_name(state_label),
                 "state_sort": state_sort_key(state_label),

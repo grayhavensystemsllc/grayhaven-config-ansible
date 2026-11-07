@@ -1,14 +1,15 @@
 ---
 - name: Normalize observability configuration
   ansible.builtin.set_fact:
-    observability_config: "{{ observability | default({}) }}"
-    observability_grafana_config: "{{ (observability | default({})).grafana_cloud | default({}) }}"
-    observability_grafana_credentials: "{{ grafana_cloud | default({}) }}"
+    observability_config: "{{ observability }}"
+    observability_grafana_config: "{{ observability.grafana_cloud }}"
+    observability_grafana_credentials: "{{ grafana_cloud }}"
+  no_log: true
 
 - name: Derive observability enablement flags
   ansible.builtin.set_fact:
-    observability_grafana_enabled: "{{ observability_grafana_config.enabled | default(false) | bool }}"
-    observability_grafana_logs_enabled: "{{ observability_grafana_config.logs_enabled | default(false) | bool }}"
+    observability_grafana_enabled: "{{ observability_grafana_config.enabled | bool }}"
+    observability_grafana_logs_enabled: "{{ observability_grafana_config.logs_enabled | bool }}"
     observability_host_tags: "{{ do_tags | default([]) }}"
 
 - name: Derive host observability tag state
@@ -35,7 +36,7 @@
 - name: Fail if Grafana Cloud is enabled outside production
   ansible.builtin.assert:
     that:
-      - not observability_grafana_enabled or baseline_validation_environment == "prod"
+      - not observability_grafana_enabled or grayhaven_environment == "prod"
     fail_msg: "Grafana Cloud observability is currently supported only in the prod environment."
     quiet: true
 
@@ -84,6 +85,10 @@
       - observability_grafana_credentials.alerting is defined
       - observability_grafana_credentials.alerting.api_token is string
       - observability_grafana_credentials.alerting.api_token | trim | length > 0
+      - observability_grafana_credentials.alerting.folder | length > 0
+      - observability_grafana_credentials.alerting.evaluation_group | length > 0
+      - observability_grafana_credentials.alerting.evaluation_interval | length > 0
+      - observability_grafana_credentials.alerting.contact_point | length > 0
       - observability_grafana_credentials.prometheus.datasource_name is string
       - observability_grafana_credentials.prometheus.datasource_name | trim | length > 0
     fail_msg: "Grafana Cloud alert sync configuration is incomplete."

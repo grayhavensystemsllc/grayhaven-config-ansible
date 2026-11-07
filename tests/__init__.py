@@ -1,1 +1,6 @@
-"""Unit tests for managed Python programs."""
+"""Unit test package with value-free diagnostics."""
+
+from tests.diagnostics import install
+
+
+install()

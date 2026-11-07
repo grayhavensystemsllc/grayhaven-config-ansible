@@ -2,3 +2,11 @@
 - name: Enforce MCP on MCP hosts
   ansible.builtin.include_tasks: host.yml
   when: grayhaven_role == "mcp"
+
+- name: Register MCP process monitoring
+  ansible.builtin.include_role:
+    name: observability
+    tasks_from: register-container
+  vars:
+    observability_register_container: "{{ mcp_container_name }}"
+  when: grayhaven_role == "mcp"

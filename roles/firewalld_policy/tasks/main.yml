@@ -10,7 +10,7 @@
 - name: Derive vault firewalld policy path
   ansible.builtin.set_fact:
     firewalld_policy_vault_path: >-
-      {{ baseline_validation_vault_checkout_dir | default('/home/ansible/grayhaven-vault') }}/firewall.yml
+      {{ grayhaven_vault_checkout_dir }}/policy/firewall.yml
 
 - name: Check vault firewalld policy on the control node
   ansible.builtin.stat:
@@ -42,7 +42,7 @@
     automation_notifications_target: >-
       {{ inventory_hostname }}
 
-      Environment: {{ baseline_validation_environment }}
+      Environment: {{ grayhaven_environment }}
   when:
     - not firewalld_policy_vault_stat.stat.exists
     - firewalld_policy_cache_stat.stat.exists
@@ -56,7 +56,7 @@
     automation_notifications_target: >-
       {{ inventory_hostname }}
 
-      Environment: {{ baseline_validation_environment }}
+      Environment: {{ grayhaven_environment }}
   when:
     - not firewalld_policy_vault_stat.stat.exists
     - not firewalld_policy_cache_stat.stat.exists
@@ -83,7 +83,7 @@
   when:
     - firewalld_policy_cache_stat.stat.exists
     - grayhaven_role == "web"
-    - baseline_validation_tls_mode == "load_balancer"
+    - grayhaven_tls_mode == "load_balancer"
 
 - name: Keep only web origin ports needed for load-balancer TLS
   ansible.builtin.set_fact:
@@ -93,7 +93,7 @@
   when:
     - firewalld_policy_cache_stat.stat.exists
     - grayhaven_role == "web"
-    - baseline_validation_tls_mode == "load_balancer"
+    - grayhaven_tls_mode == "load_balancer"
     - not (item.protocol == "tcp" and item.port_range == "443")
 
 - name: Allow private web deploy fanout between load-balanced web hosts
@@ -111,7 +111,7 @@
   when:
     - firewalld_policy_cache_stat.stat.exists
     - grayhaven_role == "web"
-    - baseline_validation_tls_mode == "load_balancer"
+    - grayhaven_tls_mode == "load_balancer"
     - managed_inventory_web_private_sources | default([]) | length > 1
 
 - name: Apply load-balancer TLS firewalld policy
@@ -124,7 +124,7 @@
   when:
     - firewalld_policy_cache_stat.stat.exists
     - grayhaven_role == "web"
-    - baseline_validation_tls_mode == "load_balancer"
+    - grayhaven_tls_mode == "load_balancer"
 
 - name: Install grayhaven firewalld zone from policy
   ansible.builtin.template:

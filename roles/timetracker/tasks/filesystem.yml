@@ -50,6 +50,7 @@
     shell: /sbin/nologin
     password: "!"
     system: true
+  no_log: true
 
 - name: Create Time Tracker state directories
   ansible.builtin.file:
@@ -85,3 +86,4 @@
       mode: "0755"
   loop_control:
     label: "{{ item.path }}"
+  no_log: true

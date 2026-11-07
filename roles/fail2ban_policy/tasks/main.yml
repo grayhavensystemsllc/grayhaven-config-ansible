@@ -15,7 +15,7 @@
     fail2ban_policy_nginx_http_auth_enabled: >-
       {{
         grayhaven_role == 'web'
-        and (baseline_validation_tls_mode | default('host')) == 'host'
+        and (grayhaven_tls_mode | default('host')) == 'host'
       }}
 
 - name: Install Grayhaven fail2ban jail policy
@@ -40,7 +40,7 @@
       port = ssh
 
       {% if fail2ban_policy_nginx_http_auth_enabled | bool %}
-      {% for domain in deploy_websites_hosted_domains | default([]) | map(attribute='domain') | list %}
+      {% for domain in hosted_domains | default([]) | map(attribute='domain') | list %}
       [nginx-http-auth-{{ domain | regex_replace('[^A-Za-z0-9_-]', '-') }}]
       enabled = true
       filter = nginx-http-auth

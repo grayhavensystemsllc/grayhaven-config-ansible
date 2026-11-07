@@ -42,8 +42,8 @@ grayhaven_primary_accent="#58ace0"
 grayhaven_elevated_hover="#74c3ec"
 grayhaven_pale_steel="#bbc7d3"
 grayhaven_charcoal_border="#444c56"
-grayhaven_warning="{{ '#b88a36' if baseline_validation_environment == 'prod' else '#6fb7b7' }}"
-grayhaven_environment="{{ 'Production' if baseline_validation_environment == 'prod' else baseline_validation_environment | title }}"
+grayhaven_warning="{{ '#b88a36' if grayhaven_environment == 'prod' else '#6fb7b7' }}"
+grayhaven_environment="{{ 'Production' if grayhaven_environment == 'prod' else grayhaven_environment | title }}"
 
 set() {
    local option=$1

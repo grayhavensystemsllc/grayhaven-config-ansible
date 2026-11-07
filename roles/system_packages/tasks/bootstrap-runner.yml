@@ -1,6 +1,9 @@
 ---
+- name: Configure bootstrap package repositories
+  ansible.builtin.import_tasks: repositories.yml
+
 - name: Install bastion runner OS dependencies
   ansible.builtin.dnf:
-    name: "{{ system_packages_bootstrap_runner_packages }}"
+    name: "{{ system_packages.baseline }}"
     state: present
   when: grayhaven_role == "bastion"
