@@ -64,7 +64,7 @@ jobs:
 
       - name: Run Ansible syntax check
         run: |
-          find playbooks -type f \( -name "*.yml" -o -name "*.yaml" \) -print0
+          find playbooks -type f \( -name "*.yml" -o -name "*.yaml" \) -print0 \
           | xargs -0 -n1 ansible-playbook -i tests/fixtures/syntax-inventory.yml --connection=local --syntax-check
 
       - name: Run ansible-lint
