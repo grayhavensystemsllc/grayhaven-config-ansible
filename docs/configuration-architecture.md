@@ -307,6 +307,9 @@ defines its own `dev.htpasswd_entries` list in `vault/web.yml`, and Ansible
 writes a separate htpasswd file for each domain. If `dev.auth_realm` is
 omitted, the realm defaults to `<domain> Development Environment`.
 
+Website configuration runs before Fail2ban so each enabled authentication jail
+has its log file before the service starts.
+
 In host TLS mode, web hosts also enable a fail2ban `nginx-http-auth` jail for
 development basic-auth failures. The jail is disabled in load-balancer TLS mode
 until client IP handling is explicitly configured for that path.

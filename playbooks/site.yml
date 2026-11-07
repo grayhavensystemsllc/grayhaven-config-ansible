@@ -105,7 +105,6 @@
     - dns_resolver
     - time_sync
     - firewalld_policy
-    - fail2ban_policy
     - digitalocean_agent
     - automation_runner
     - reboot_notifications
@@ -114,6 +113,7 @@
     - deploy_websites
     - timetracker
     - mcp
+    - fail2ban_policy
     - observability
 
   post_tasks:
