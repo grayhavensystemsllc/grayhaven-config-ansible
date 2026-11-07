@@ -1,9 +1,6 @@
 ---
-- name: Install EPEL release package
-  ansible.builtin.dnf:
-    name: epel-release
-    state: present
-  when: "'epel-release' in system_packages.baseline"
+- name: Configure baseline package repositories
+  ansible.builtin.import_tasks: repositories.yml
 
 - name: Update installed operating system packages
   ansible.builtin.dnf:
