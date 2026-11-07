@@ -73,6 +73,29 @@
     - grayhaven_role == "bastion"
     - system_packages_ansible_runner_ownership_drift.stdout | default("") | length > 0
 
+- name: Create runtime installer directory on bastion hosts
+  ansible.builtin.file:
+    path: "{{ system_packages_ansible_runtime_venv | dirname }}/scripts"
+    state: directory
+    owner: ansible
+    group: ansible
+    mode: "0755"
+  when: grayhaven_role == "bastion"
+
+- name: Copy pinned runtime requirements to bastion hosts
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../{{ item.path }}"
+    dest: "{{ system_packages_ansible_runtime_venv | dirname }}/{{ item.path }}"
+    owner: ansible
+    group: ansible
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: pip3_requirements.txt, mode: "0644"}
+    - {path: galaxy_requirements.yml, mode: "0644"}
+    - {path: galaxy_requirements.sha256, mode: "0644"}
+    - {path: scripts/install-galaxy-collections, mode: "0755"}
+  when: grayhaven_role == "bastion"
+
 - name: Check Ansible runtime command on bastion hosts
   ansible.builtin.stat:
     path: "{{ system_packages_ansible_runtime_venv }}/bin/ansible"
@@ -81,7 +104,7 @@
 
 - name: Check Ansible runtime requirements checksum on bastion hosts
   ansible.builtin.stat:
-    path: "{{ playbook_dir }}/../pip3_requirements.txt"
+    path: "{{ system_packages_ansible_runtime_venv | dirname }}/pip3_requirements.txt"
     checksum_algorithm: sha256
   register: system_packages_ansible_runtime_requirements
   when: grayhaven_role == "bastion"
@@ -132,7 +155,7 @@
       -m pip install --upgrade
       --require-hashes
       --requirement
-      {{ playbook_dir }}/../pip3_requirements.txt
+      {{ system_packages_ansible_runtime_venv | dirname }}/pip3_requirements.txt
   become: true
   become_user: ansible
   environment:
@@ -202,8 +225,8 @@
     path: "{{ item }}"
     checksum_algorithm: sha256
   loop:
-    - "{{ playbook_dir }}/../galaxy_requirements.yml"
-    - "{{ playbook_dir }}/../galaxy_requirements.sha256"
+    - "{{ system_packages_ansible_runtime_venv | dirname }}/galaxy_requirements.yml"
+    - "{{ system_packages_ansible_runtime_venv | dirname }}/galaxy_requirements.sha256"
   register: system_packages_galaxy_requirements
   when: grayhaven_role == "bastion"
 
@@ -228,7 +251,7 @@
 
 - name: Install checksum-verified Ansible Galaxy collections on bastion hosts
   ansible.builtin.command:
-    cmd: "{{ playbook_dir }}/../scripts/install-galaxy-collections"
+    cmd: "{{ system_packages_ansible_runtime_venv | dirname }}/scripts/install-galaxy-collections"
   become: true
   become_user: ansible
   environment:
