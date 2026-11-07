@@ -6,7 +6,7 @@
   connection: local
   become: true
   vars_files:
-    - vars/implementation.yml
+    - ../vars/implementation.yml
 
   tasks:
     # Validate the OpenTofu/cloud-init handoff before any persistent host

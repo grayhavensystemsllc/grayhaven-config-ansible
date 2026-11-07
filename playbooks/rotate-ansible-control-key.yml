@@ -3,7 +3,7 @@
   hosts: all
   become: true
   vars_files:
-    - vars/implementation.yml
+    - ../vars/implementation.yml
   gather_facts: false
 
   tasks:
