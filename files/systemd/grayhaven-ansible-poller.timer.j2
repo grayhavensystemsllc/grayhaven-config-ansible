@@ -2,7 +2,7 @@
 Description=Poll Grayhaven Systems LLC Ansible repositories for changes
 
 [Timer]
-OnCalendar={{ automation_poller_schedule }}
+OnCalendar={{ automation_runner_poller_schedule }}
 RandomizedDelaySec=30s
 Persistent=true
 Unit=grayhaven-ansible-poller.service

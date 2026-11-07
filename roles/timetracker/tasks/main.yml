@@ -2,3 +2,11 @@
 - name: Enforce Time Tracker on web hosts
   ansible.builtin.include_tasks: web.yml
   when: grayhaven_role == "web"
+
+- name: Register Time Tracker process monitoring
+  ansible.builtin.include_role:
+    name: observability
+    tasks_from: register-container
+  vars:
+    observability_register_container: "{{ timetracker_container_name }}"
+  when: grayhaven_role == "web"

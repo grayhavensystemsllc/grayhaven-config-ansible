@@ -11,10 +11,7 @@
 - name: Set managed user archive path
   ansible.builtin.set_fact:
     admin_access_homedir_archive_path: >-
-      {{
-        backup.repositories.local.homedir_archive_path
-        | default(admin_access_default_homedir_archive_path)
-      }}
+      {{ backup.repositories.local.homedir_archive_path }}
   no_log: true
 
 - name: Ensure managed user archive path exists

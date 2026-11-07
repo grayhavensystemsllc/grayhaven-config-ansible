@@ -1,0 +1,8 @@
+---
+- name: Register application container for process monitoring
+  ansible.builtin.set_fact:
+    observability_registered_containers: >-
+      {{
+        (observability_registered_containers + [observability_register_container])
+        | unique
+      }}

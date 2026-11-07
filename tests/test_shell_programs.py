@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import shlex
@@ -13,6 +14,8 @@ import textwrap
 import unittest
 from unittest import mock
 import xml.etree.ElementTree as ET
+
+import yaml
 
 from tests import shell_coverage
 
@@ -114,6 +117,94 @@ class ShellProgramTests(unittest.TestCase):
                     "@" + folder + "/mock-dependency.yml" in result.stdout,
                     include_optional,
                 )
+
+
+    def test_secret_environment_uses_grouped_configuration(self) -> None:
+        for valid_selector in (True, False):
+            with self.subTest(valid_selector=valid_selector), tempfile.TemporaryDirectory() as folder:
+                root = pathlib.Path(folder)
+                (root / "config.yml").write_text(json.dumps({
+                    "certificate": {"environment": "staging", "email": "operator@example.invalid"},
+                }))
+                (root / "server_configuration.yml").write_text(json.dumps({
+                    "network": {"vpc_cidr": "172.28.0.0/16"},
+                }))
+                (root / "ansible.yml").write_text(json.dumps({
+                    "ansible": {"notifications": {"environment": "delivery-alpha"}},
+                }))
+                secret = {
+                    "discord_webhooks": {
+                        "delivery-alpha" if valid_selector else "delivery-beta":
+                            "https://hooks.example.invalid/fictional/credential",
+                    },
+                    "digitalocean_inventory_api_token": "invented-inventory-credential",
+                }
+                provider = root / "provider"
+                executable(provider, "#!/usr/bin/python3\nimport json\nprint(json.dumps("
+                           + repr(secret) + "))\n")
+                result = self.run_bash(
+                    """
+                    export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                    source files/grayhaven-ansible-runner
+                    VAULT_CHECKOUT_DIR="$FIXTURE_ROOT"
+                    RUNNER_SECRET_ENV="$FIXTURE_ROOT/generated-env"
+                    VAULT_PASSWORD_FILE="$FIXTURE_ROOT/opaque-password"
+                    export ANSIBLE_VAULT_BIN="$FIXTURE_ROOT/provider"
+                    render_secret_environment
+                    python3 - <<'PY'
+import json
+import os
+print(json.dumps({
+    "token": os.environ["DO_API_TOKEN"] == "invented-inventory-credential",
+    "webhook": os.environ["DISCORD_WEBHOOK_URL"] == "https://hooks.example.invalid/fictional/credential",
+    "network": os.environ["GRAYHAVEN_NETWORK_VPC_CIDR"] == "172.28.0.0/16",
+    "certificate": os.environ["GRAYHAVEN_CERTIFICATE_EMAIL"] == "operator@example.invalid",
+}))
+PY
+                    """,
+                    env={"FIXTURE_ROOT": folder},
+                )
+                self.assertEqual(result.returncode == 0, valid_selector)
+                self.assertEqual(stat.S_IMODE((root / "generated-env").stat().st_mode), 0o600)
+                if valid_selector:
+                    self.assertTrue(all(json.loads(result.stdout).values()))
+
+    def test_rendered_runtime_values_follow_supplied_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            (root / "policy").mkdir()
+            infrastructure = {"identity": {"client_name": "fictional", "client_domain": "example.invalid"}}
+            (root / "policy/infrastructure.yml").write_text(json.dumps(infrastructure))
+            variables = {
+                "REPO_REF": "feature/fixture",
+                "GRAYHAVEN_ENVIRONMENT": "fixture",
+                "GRAYHAVEN_TLS_MODE": "host",
+                "DISCORD_WEBHOOK_ID": "invented-notice",
+                "DISCORD_WEBHOOK_TOKEN": "invented-notice-credential",
+            }
+            result = self.run_bash(
+                """
+                export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                source files/grayhaven-ansible-runner
+                export VAULT_CHECKOUT_DIR="$FIXTURE_ROOT"
+                RUNNER_VARS="$FIXTURE_ROOT/runtime-values"
+                export REPO_REF="$FIXTURE_REF"
+                render_runner_vars
+                """,
+                env={**variables, "FIXTURE_ROOT": folder, "FIXTURE_REF": variables["REPO_REF"]},
+            )
+            self.assertEqual(result.returncode, 0)
+            # Parsing the generated private file stays inside the test process.
+            output = yaml.safe_load((root / "runtime-values").read_text())
+            self.assertEqual(output, {
+                "infrastructure": infrastructure,
+                "grayhaven_config_repo_ref": variables["REPO_REF"],
+                "grayhaven_environment": variables["GRAYHAVEN_ENVIRONMENT"],
+                "grayhaven_tls_mode": variables["GRAYHAVEN_TLS_MODE"],
+                "automation_notifications_discord_webhook_id": variables["DISCORD_WEBHOOK_ID"],
+                "automation_notifications_discord_webhook_token": variables["DISCORD_WEBHOOK_TOKEN"],
+            })
+            self.assertEqual(stat.S_IMODE((root / "runtime-values").stat().st_mode), 0o600)
 
     def test_runner_arguments_and_dispatch(self) -> None:
         for arguments, expected in (

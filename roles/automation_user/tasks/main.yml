@@ -19,7 +19,7 @@
 - name: Add vault Ansible control key before controller handoff
   ansible.builtin.lineinfile:
     path: /home/ansible/.ssh/authorized_keys
-    line: "{{ ansible_control_public_key | trim }}"
+    line: "{{ ansible_control.public_key | trim }}"
     state: present
     create: true
     owner: ansible
@@ -33,7 +33,7 @@
     owner: ansible
     group: ansible
     mode: "0600"
-    content: "{{ ansible_control_private_key | trim }}\n"
+    content: "{{ ansible_control.private_key | trim }}\n"
   when: grayhaven_role == "bastion"
   no_log: true
 
@@ -43,7 +43,7 @@
     owner: ansible
     group: ansible
     mode: "0644"
-    content: "{{ ansible_control_public_key | trim }}\n"
+    content: "{{ ansible_control.public_key | trim }}\n"
   when: grayhaven_role == "bastion"
   no_log: true
 
@@ -63,5 +63,5 @@
     owner: ansible
     group: ansible
     mode: "0600"
-    content: "{{ ansible_control_public_key | trim }}\n"
+    content: "{{ ansible_control.public_key | trim }}\n"
   no_log: true

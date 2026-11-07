@@ -32,7 +32,7 @@
         {
           'webhook_id': automation_notifications_discord_webhook_id,
           'webhook_token': automation_notifications_discord_webhook_token,
-          'timezone': baseline_validation_timezone,
+          'timezone': timezone,
         }
         | to_nice_json
       }}

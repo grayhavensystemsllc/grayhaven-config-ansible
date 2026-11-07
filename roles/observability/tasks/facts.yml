@@ -11,7 +11,7 @@
         observability_host_tags
         | select('match', '^client-')
         | first
-        | default('client-' ~ managed_client_name)
+        | default('client-' ~ infrastructure.identity.client_name)
       }}
     observability_project_tag: >-
       {{
@@ -24,10 +24,22 @@
 - name: Initialize observability host metadata
   ansible.builtin.set_fact:
     observability_hosts: []
+    observability_process_containers: {}
 
 - name: Build observability host metadata
   ansible.builtin.set_fact:
     observability_hosts: "{{ observability_hosts + [observability_host_entry] }}"
+    observability_process_containers: >-
+      {{
+        observability_process_containers
+        | combine({
+            observability_loop_role:
+              (
+                observability_process_containers.get(observability_loop_role, [])
+                + hostvars[item].observability_registered_containers
+              ) | unique
+          })
+      }}
   loop: "{{ ansible_play_hosts_all }}"
   vars:
     observability_loop_tags: "{{ hostvars[item].do_tags | default([]) }}"
@@ -36,7 +48,7 @@
         observability_loop_tags
         | select('match', '^client-')
         | first
-        | default('client-' ~ managed_client_name)
+        | default('client-' ~ infrastructure.identity.client_name)
       }}
     observability_loop_project_tag: >-
       {{
@@ -61,8 +73,9 @@
       role: "{{ observability_loop_role }}"
       project: "{{ observability_loop_project_tag | regex_replace('^project-', '') }}"
       client: "{{ observability_loop_client_tag | regex_replace('^client-', '') }}"
-      environment: "{{ baseline_validation_environment }}"
+      environment: "{{ grayhaven_environment }}"
       control_node: "{{ 'control-node' in observability_loop_tags }}"
+      process_containers: "{{ hostvars[item].observability_registered_containers }}"
   when: observability_loop_role != "unknown"
   no_log: true
 
@@ -73,7 +86,7 @@
 - name: Build observability site metadata
   ansible.builtin.set_fact:
     observability_web_sites: "{{ observability_web_sites + [observability_site_entry] }}"
-  loop: "{{ deploy_websites_hosted_domains | default([]) }}"
+  loop: "{{ hosted_domains | default([]) }}"
   loop_control:
     label: "{{ item.domain | default('undefined-domain') }}"
   vars:
@@ -81,19 +94,19 @@
     observability_site_domain: >-
       {{
         observability_root_domain
-        if baseline_validation_environment == 'prod'
+        if grayhaven_environment == 'prod'
         else 'staging.' ~ observability_root_domain
       }}
     observability_site_www_domain: >-
       {{
         'www.' ~ observability_root_domain
-        if baseline_validation_environment == 'prod'
+        if grayhaven_environment == 'prod'
         else 'www.staging.' ~ observability_root_domain
       }}
     observability_site_dev_domain: >-
       {{
         'dev.' ~ observability_root_domain
-        if baseline_validation_environment == 'prod'
+        if grayhaven_environment == 'prod'
         else 'dev.staging.' ~ observability_root_domain
       }}
     observability_site_entry:
@@ -106,7 +119,7 @@
       cert_name: >-
         {{
           observability_root_domain
-          if baseline_validation_environment == 'prod'
+          if grayhaven_environment == 'prod'
           else 'staging.' ~ observability_root_domain
         }}
       nginx_log_names:
@@ -150,7 +163,7 @@
       redirect_http: false
       health_check: mcp_health
       health_pending: "1m"
-      health_url: "http://127.0.0.1:{{ mcp_host_port | default(8787) }}{{ mcp_health_path | default('/healthz') }}"
+      health_url: "http://127.0.0.1:{{ mcp_host_port }}{{ mcp_health_path }}"
       nginx_log_names: [access, error]
   when:
     - mcp is defined

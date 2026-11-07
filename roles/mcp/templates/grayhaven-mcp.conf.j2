@@ -1,6 +1,6 @@
 # Managed by Ansible. Local changes will be overwritten.
 
-{% set download_path = (mcp_repository_configuration | combine(mcp_config_overrides, recursive=true)).file_transfers.download_path %}
+{% set download_path = mcp_repository_configuration.file_transfers.download_path %}
 map $uri $grayhaven_mcp_safe_path {
     default $uri;
     "~^/connect/" /connect/[redacted];

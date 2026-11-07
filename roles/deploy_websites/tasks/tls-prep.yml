@@ -1,7 +1,7 @@
 ---
 - name: Install web hosting packages
   ansible.builtin.dnf:
-    name: "{{ deploy_websites_packages }}"
+    name: "{{ system_packages.web }}"
     state: present
 
 - name: Create Certbot configuration directories

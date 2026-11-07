@@ -232,7 +232,7 @@
         role: "{{ observability_role }}"
         project: "{{ observability_project }}"
         client: "{{ observability_client }}"
-        environment: "{{ baseline_validation_environment }}"
+        environment: "{{ grayhaven_environment }}"
         control_node: "{{ observability_host_is_control_node }}"
       hosts: "{{ observability_hosts }}"
       restic:
@@ -262,7 +262,7 @@
         services: "{{ observability_proton_services }}"
       process:
         enabled: true
-        containers: "{{ observability_process_containers.get(grayhaven_role, []) }}"
+        containers: "{{ observability_registered_containers }}"
       public_status:
         enabled: "{{ observability_host_is_control_node }}"
         providers: "{{ observability_public_status_services }}"
@@ -304,7 +304,7 @@
         api_token: "{{ observability_grafana_credentials.irm_alert_groups.api_token }}"
       labels:
         client: "{{ observability_client }}"
-        environment: "{{ baseline_validation_environment }}"
+        environment: "{{ grayhaven_environment }}"
       output_path: "{{ observability_textfile_dir }}/irm-alert-groups.prom"
   when:
     - observability_metrics_enabled

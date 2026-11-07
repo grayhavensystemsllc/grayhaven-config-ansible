@@ -2,16 +2,10 @@
 - name: Derive local backup settings
   ansible.builtin.set_fact:
     restic_backup_repository_path: >-
-      {{
-        backup.repositories.local.repository_path
-        | default('/var/backups/restic')
-      }}
+      {{ backup.repositories.local.repository_path }}
     restic_backup_homedir_archive_path: >-
-      {{
-        backup.repositories.local.homedir_archive_path
-        | default('/var/backups/deleted-homedir-archives')
-      }}
-    restic_backup_keep_daily: "{{ backup.retention.keep_daily | default(7) }}"
+      {{ backup.repositories.local.homedir_archive_path }}
+    restic_backup_keep_daily: "{{ backup.retention.keep_daily }}"
     restic_backup_config: "{{ restic | default({}) }}"
     restic_backup_remote_config: "{{ backup.repositories.remote | default({}) }}"
     restic_backup_exclude_paths: >-
@@ -53,10 +47,7 @@
 - name: Derive restic credential settings
   ansible.builtin.set_fact:
     restic_backup_password: >-
-      {{
-        restic_backup_config.encryption_password
-        | default(restic_password | default(''))
-      }}
+      {{ restic_backup_config.passphrase }}
     restic_backup_restic_remotes: "{{ restic_backup_config.remotes | default({}) }}"
   no_log: true
 
@@ -73,13 +64,7 @@
               if grayhaven_role == 'mcp' else []
             )
           +
-          (
-            backup.include
-            | default([
-                '/home',
-                '/var/log'
-              ])
-          )
+          backup.include
         )
         | unique
       }}
@@ -102,9 +87,9 @@
     # Cloud Storage returns canonical uppercase values; normalize inputs before
     # the bucket module performs its case-sensitive idempotence comparison.
     restic_backup_remote_gcs_location: >-
-      {{ restic_backup_remote_config.location | default('US-EAST1', true) | trim | upper }}
+      {{ restic_backup_remote_config.location | default('') | trim | upper }}
     restic_backup_remote_gcs_storage_class: >-
-      {{ restic_backup_remote_config.storage_class | default('STANDARD', true) | trim | upper }}
+      {{ restic_backup_remote_config.storage_class | default('') | trim | upper }}
     restic_backup_remote_gcs_credentials_json: >-
       {{ restic_backup_gcs_config.credentials_json | default('') }}
     restic_backup_remote_gcs_bucket_name: "{{ inventory_hostname.split('.')[0] }}-restic"
@@ -116,7 +101,7 @@
     restic_backup_remote_gcs_labels:
       managed_by: ansible
       client: "{{ restic_backup_label_client }}"
-      env: "{{ baseline_validation_environment }}"
+      env: "{{ grayhaven_environment }}"
       project: "{{ restic_backup_label_project }}"
       role: "{{ grayhaven_role }}"
       purpose: restic
@@ -129,7 +114,7 @@
           restic_backup_label_tags
           | select('match', '^client-')
           | first
-          | default('client-' ~ managed_client_name)
+          | default('client-' ~ infrastructure.identity.client_name)
         )
         | regex_replace('^client-', '')
       }}

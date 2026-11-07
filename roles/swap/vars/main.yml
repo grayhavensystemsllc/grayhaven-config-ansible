@@ -1,0 +1,3 @@
+---
+swap_swapfile_path: "{{ swapfile_path | default('/swapfile') }}"
+swap_swapfile_size: "{{ swap.size }}"

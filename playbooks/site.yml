@@ -2,20 +2,36 @@
 - name: Apply Grayhaven Systems LLC base configuration
   hosts: all
   become: true
+  vars_files:
+    - vars/implementation.yml
   gather_facts: false
   any_errors_fatal: true
 
   pre_tasks:
     - name: Load infrastructure identity
       ansible.builtin.include_vars:
-        file: "{{ baseline_validation_vault_checkout_dir }}/infrastructure.yml"
+        file: "{{ grayhaven_vault_checkout_dir }}/policy/infrastructure.yml"
         name: infrastructure
       no_log: true
 
-    - name: Load operational configuration
+    - name: Load server configuration
       ansible.builtin.include_vars:
-        file: "{{ baseline_validation_vault_checkout_dir }}/operations.yml"
+        file: "{{ grayhaven_vault_checkout_dir }}/server_configuration.yml"
       no_log: true
+
+    - name: Load automation configuration
+      ansible.builtin.include_vars:
+        file: "{{ grayhaven_vault_checkout_dir }}/ansible.yml"
+      no_log: true
+
+    - name: Load observability configuration
+      ansible.builtin.include_vars:
+        file: "{{ grayhaven_vault_checkout_dir }}/grafana/observability.yml"
+      no_log: true
+
+    - name: Initialize managed process container registrations
+      ansible.builtin.set_fact:
+        observability_registered_containers: []
 
     - name: Prepare managed inventory metadata before connecting
       ansible.builtin.include_role:

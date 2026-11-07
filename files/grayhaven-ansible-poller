@@ -3,15 +3,18 @@ set -Eeuo pipefail
 
 RUNNER_ENV="/etc/grayhaven/ansible/runner.env"
 ANSIBLE_HOME="/home/ansible"
-DEFAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-config-ansible"
-DEFAULT_VAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-vault"
+# Repository settings are populated by the required runner environment file.
+REPO_URL=""
+REPO_REF=""
+CHECKOUT_DIR=""
+VAULT_REPO_URL=""
+VAULT_REPO_REF=""
+VAULT_CHECKOUT_DIR=""
 ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_HOME}/.ansible/collections"
 ANSIBLE_CONTROL_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/id_ed25519"
 VAULT_DEPLOY_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/grayhaven_vault_deploy_key"
 GITHUB_KNOWN_HOSTS="${ANSIBLE_HOME}/.ssh/github_known_hosts"
 GITHUB_META_URL="https://api.github.com/meta"
-DEFAULT_REPO_URL="https://github.com/grayhavensystemsllc/grayhaven-config-ansible.git"
-DEFAULT_REPO_REF="main"
 
 log() {
   printf '[grayhaven-ansible-poller] %s\n' "$*"
@@ -131,10 +134,13 @@ main() {
   # shellcheck disable=SC1090
   source "$RUNNER_ENV"
 
-  REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
-  REPO_REF="${REPO_REF:-$DEFAULT_REPO_REF}"
-  CHECKOUT_DIR="${CHECKOUT_DIR:-$DEFAULT_CHECKOUT_DIR}"
-  VAULT_CHECKOUT_DIR="${VAULT_CHECKOUT_DIR:-$DEFAULT_VAULT_CHECKOUT_DIR}"
+  local setting
+  for setting in REPO_URL REPO_REF CHECKOUT_DIR VAULT_REPO_URL VAULT_REPO_REF VAULT_CHECKOUT_DIR; do
+    if [[ -z "${!setting:-}" ]]; then
+      log "A required runner repository setting is missing."
+      exit 1
+    fi
+  done
 
   prepare_github_known_hosts
 

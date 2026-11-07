@@ -8,12 +8,12 @@
       - root_password_hash is defined
       - root_password_hash is string
       - root_password_hash | trim | length > 0
-      - ansible_control_public_key is defined
-      - ansible_control_public_key is string
-      - ansible_control_public_key | trim | length > 0
-      - ansible_control_private_key is defined
-      - ansible_control_private_key is string
-      - ansible_control_private_key | trim | length > 0
+      - ansible_control.public_key is defined
+      - ansible_control.public_key is string
+      - ansible_control.public_key | trim | length > 0
+      - ansible_control.private_key is defined
+      - ansible_control.private_key is string
+      - ansible_control.private_key | trim | length > 0
     fail_msg: "Required baseline variables were not provided."
     quiet: true
   no_log: true

@@ -4,7 +4,10 @@
     that:
       - restic_backup_password_value is string
       - restic_backup_password_value | length > 0
-      - backup.schedule | default('daily') == 'daily'
+      - backup.schedule is string
+      - backup.schedule | length > 0
+      - backup.integrity_schedule is string
+      - backup.integrity_schedule | length > 0
       - restic_backup_remote_provider in ["", "gcs"]
       - not (restic_backup_remote_enabled | bool) or restic_backup_remote_provider == "gcs"
       - not (restic_backup_remote_enabled | bool) or backup.repositories.remote.project_id is defined
@@ -16,18 +19,15 @@
         not (restic_backup_remote_enabled | bool)
         or restic_backup_remote_gcs_credentials_json | from_json is mapping
     fail_msg: >-
-      Backups require a restic encryption password, support only a daily
-      schedule, and only support optional GCS remote repositories.
+      Backups require a restic passphrase and explicit schedules, and support
+      optional GCS remote repositories.
     quiet: true
   vars:
     restic_backup_config: "{{ restic | default({}) }}"
     restic_backup_restic_remotes: "{{ restic_backup_config.remotes | default({}) }}"
     restic_backup_gcs_config: "{{ restic_backup_restic_remotes.gcs | default({}) }}"
     restic_backup_password_value: >-
-      {{
-        restic_backup_config.encryption_password
-        | default(restic_password | default(''))
-      }}
+      {{ restic_backup_config.passphrase }}
     restic_backup_remote_gcs_credentials_json: >-
       {{ restic_backup_gcs_config.credentials_json | default('') }}
     restic_backup_remote_config: "{{ backup.repositories.remote | default({}) }}"

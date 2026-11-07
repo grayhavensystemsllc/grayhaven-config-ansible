@@ -1,0 +1,21 @@
+---
+deploy_websites_root: /var/www
+deploy_websites_checkout_root: /home/ansible/website-repos
+deploy_websites_fallback_root: /home/ansible/website-fallbacks
+deploy_websites_rendered_root: /home/ansible/website-rendered
+deploy_websites_frontend_path: site/frontend
+deploy_websites_config_dir: /etc/grayhaven/websites
+deploy_websites_runtime_dir: /run/grayhaven-website-deploy
+deploy_websites_state_dir: /var/lib/grayhaven/website-deploy
+deploy_websites_webhook_bind_host: 127.0.0.1
+deploy_websites_webhook_bind_port: 8791
+deploy_websites_fanout_bind_host: 0.0.0.0
+deploy_websites_fanout_timeout_seconds: 30
+deploy_websites_fanout_retries: 2
+deploy_websites_github_meta_url: https://api.github.com/meta
+deploy_websites_certbot_email: "{{ certificate.email }}"
+deploy_websites_certificate_environment: "{{ certificate.environment }}"
+deploy_websites_tls_mode: "{{ grayhaven_tls_mode }}"
+deploy_websites_certbot_environment: "{{ deploy_websites_certificate_environment }}"
+deploy_websites_certbot_credentials_file: /etc/letsencrypt/digitalocean.ini
+deploy_websites_dev_htpasswd_dir: /etc/nginx/grayhaven-dev.htpasswd.d

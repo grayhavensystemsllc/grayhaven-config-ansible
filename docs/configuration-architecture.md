@@ -116,11 +116,17 @@ Its structure follows the
 [file schema](https://github.com/grayhavensystemsllc/grayhaven-vault-example/blob/main/docs/schema.md)
 documented in the
 [grayhaven-vault-example](https://github.com/grayhavensystemsllc/grayhaven-vault-example)
-repository. `infrastructure.yml`, `operations.yml`, `config.yml`, and
-`firewall.yml` remain plaintext. Runtime role settings come from `operations.yml`;
-`config.yml` overrides matching environment settings. Production alert definitions
-and UID mappings are loaded from `grafana-alert-rules.yml` and
-`grafana-alert-rule-uids.yml`. Files under `vault/` are decrypted at runtime.
+repository. Plaintext files are grouped by purpose: `policy/` contains
+infrastructure and firewall policy, `grafana/` contains observability settings,
+alert definitions and UID mappings, and the root contains `config.yml`,
+`server_configuration.yml` and `ansible.yml`. Each setting has one source.
+Fixed implementation values live in the config repository; server environment,
+certificate settings and application identity are derived from their canonical
+inputs. Files under `vault/` are decrypted at runtime.
+
+Application roles register their containers with the observability role during
+each convergence. Host process monitoring and generated alert rules use those
+registrations; container names are not configured separately in Vault.
 
 Production reads the vault `main` branch. Staging reads the vault `staging`
 branch.
@@ -157,7 +163,7 @@ smaller task boundaries. The baseline covers:
 - the DigitalOcean metrics agent from the managed DigitalOcean package
   repository;
 - managed swap;
-- Quad9 DNS resolvers through NetworkManager;
+- configured DNS resolvers through NetworkManager;
 - AlmaLinux time synchronization;
 - firewalld inbound rules from the vault firewall policy;
 - local host aliases such as `example-app-prod-web-01` and

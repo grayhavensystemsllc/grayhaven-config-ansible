@@ -210,7 +210,7 @@ Discord returns HTTP `204` when the webhook accepts the notification.
 
 Rotate the webhook from the workstation's `grayhaven-vault` checkout. Use
 `main` and `discord_webhooks.production` for production, or `staging` and
-`discord_webhooks.testing` for staging. Keep the old webhook active until the
+`discord_webhooks.staging` for staging. Keep the old webhook active until the
 replacement is in use.
 
 1. Create a replacement webhook in Discord. Leave the old webhook in place.
@@ -822,7 +822,7 @@ for managed-host SSH. The playbook removes the staged key files from bastions.
 ## Ansible Control Key Rotation
 
 Normal convergence enforces the vault-defined Ansible control key. After
-updating `ansible_control_public_key` and `ansible_control_private_key` in
+updating `ansible_control.public_key` and `ansible_control.private_key` in
 encrypted `grayhaven-vault` data, run the normal runner service from the active
 control bastion.
 
@@ -911,7 +911,7 @@ health endpoint after convergence or maintenance.
 
 ## Changing the Managed Timezone
 
-The `baseline_validation_timezone` Ansible variable controls both the operating-system
+The `timezone` Ansible variable controls both the operating-system
 timezone and the Time Tracker container's `TZ` setting. Do not change the
 timezone directly on a managed host or inside the container.
 
@@ -919,13 +919,13 @@ timezone directly on a managed host or inside the container.
    open the operational settings file.
 
    ```bash
-   "${EDITOR:-vi}" operations.yml
+   "${EDITOR:-vi}" server_configuration.yml
    ```
 
-2. Set `baseline_validation_timezone` to the required IANA timezone name.
+2. Set `timezone` to the required IANA timezone name.
 
    ```yaml
-   baseline_validation_timezone: <Area/Location>
+   timezone: <Area/Location>
    ```
 
 3. Confirm that the selected timezone exists in the workstation's timezone
@@ -939,7 +939,7 @@ timezone directly on a managed host or inside the container.
 4. Validate the changed YAML and Git diff.
 
    ```bash
-   yamllint operations.yml
+   yamllint server_configuration.yml
    git diff --check
    ```
 

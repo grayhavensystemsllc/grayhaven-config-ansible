@@ -1,0 +1,5 @@
+---
+automation_notifications_environment: "{{ grayhaven_environment }}"
+automation_notifications_timezone: "{{ timezone }}"
+automation_notifications_target: "{{ inventory_hostname }}"
+automation_notifications_colors: "{{ ansible.notifications.colors }}"

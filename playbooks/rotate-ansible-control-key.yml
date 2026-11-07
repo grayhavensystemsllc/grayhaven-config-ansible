@@ -2,19 +2,21 @@
 - name: Rotate Ansible control key from vault values
   hosts: all
   become: true
+  vars_files:
+    - vars/implementation.yml
   gather_facts: false
 
   tasks:
     - name: Validate vault control key values
       ansible.builtin.assert:
         that:
-          - ansible_control_public_key is defined
-          - ansible_control_public_key is string
-          - ansible_control_public_key | trim | length > 0
-          - ansible_control_private_key is defined
-          - ansible_control_private_key is string
-          - ansible_control_private_key | trim | length > 0
-        fail_msg: "ansible_control_public_key and ansible_control_private_key must be loaded from the vault."
+          - ansible_control.public_key is defined
+          - ansible_control.public_key is string
+          - ansible_control.public_key | trim | length > 0
+          - ansible_control.private_key is defined
+          - ansible_control.private_key is string
+          - ansible_control.private_key | trim | length > 0
+        fail_msg: "ansible_control.public_key and ansible_control.private_key must be loaded from the vault."
         quiet: true
       no_log: true
 
@@ -24,7 +26,7 @@
     - name: Add vault control key before replacing bastion private key
       ansible.posix.authorized_key:
         user: ansible
-        key: "{{ ansible_control_public_key | trim }}"
+        key: "{{ ansible_control.public_key | trim }}"
         state: present
       no_log: true
 
@@ -34,7 +36,7 @@
         owner: ansible
         group: ansible
         mode: "0600"
-        content: "{{ ansible_control_private_key | trim }}\n"
+        content: "{{ ansible_control.private_key | trim }}\n"
       when: grayhaven_role == "bastion"
       no_log: true
 
@@ -44,7 +46,7 @@
         owner: ansible
         group: ansible
         mode: "0600"
-        content: "{{ ansible_control_public_key | trim }}\n"
+        content: "{{ ansible_control.public_key | trim }}\n"
       no_log: true
 
     - name: Install vault control public key on bastions
@@ -53,6 +55,6 @@
         owner: ansible
         group: ansible
         mode: "0644"
-        content: "{{ ansible_control_public_key | trim }}\n"
+        content: "{{ ansible_control.public_key | trim }}\n"
       when: grayhaven_role == "bastion"
       no_log: true

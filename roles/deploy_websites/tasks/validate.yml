@@ -4,8 +4,8 @@
 - name: Validate website hosting variables
   ansible.builtin.assert:
     that:
-      - deploy_websites_hosted_domains is iterable
-      - deploy_websites_hosted_domains | length > 0
+      - hosted_domains is iterable
+      - hosted_domains | length > 0
       - deploy_websites_certbot_email is string
       - deploy_websites_certbot_email | trim | length > 0
       - deploy_websites_certbot_environment in ["production", "staging"]
@@ -87,7 +87,7 @@
       only deployment.type=static is supported. If deployment.repository is
       present, it must define an HTTPS public repository URL and webhook secret.
     quiet: true
-  loop: "{{ deploy_websites_hosted_domains }}"
+  loop: "{{ hosted_domains }}"
   loop_control:
     label: "{{ item.domain | default('undefined-domain') }}"
   vars:
@@ -106,7 +106,7 @@
       - item.dev.htpasswd_entries | select('match', '^[^:]+:.+') | list | length == item.dev.htpasswd_entries | length
     fail_msg: "Each hosted domain must define dev.htpasswd_entries."
     quiet: true
-  loop: "{{ deploy_websites_hosted_domains }}"
+  loop: "{{ hosted_domains }}"
   loop_control:
     label: "{{ item.domain | default('undefined-domain') }}"
   no_log: true
@@ -123,7 +123,7 @@
 - name: Build site definitions from hosted domains
   ansible.builtin.set_fact:
     deploy_websites_sites: "{{ deploy_websites_sites + [deploy_websites_site] }}"
-  loop: "{{ deploy_websites_hosted_domains }}"
+  loop: "{{ hosted_domains }}"
   loop_control:
     label: "{{ item.domain }}"
   vars:
@@ -159,26 +159,26 @@
       domain: >-
         {{
           deploy_websites_domain
-          if deploy_websites_environment == 'prod'
+          if grayhaven_environment == 'prod'
           else 'staging.' ~ deploy_websites_domain
         }}
       aliases:
         - >-
           {{
             'www.' ~ deploy_websites_domain
-            if deploy_websites_environment == 'prod'
+            if grayhaven_environment == 'prod'
             else 'www.staging.' ~ deploy_websites_domain
           }}
       dev_domain: >-
         {{
           'dev.' ~ deploy_websites_domain
-          if deploy_websites_environment == 'prod'
+          if grayhaven_environment == 'prod'
           else 'dev.staging.' ~ deploy_websites_domain
         }}
       cert_name: >-
         {{
           deploy_websites_domain
-          if deploy_websites_environment == 'prod'
+          if grayhaven_environment == 'prod'
           else 'staging.' ~ deploy_websites_domain
         }}
       auth_realm: >-

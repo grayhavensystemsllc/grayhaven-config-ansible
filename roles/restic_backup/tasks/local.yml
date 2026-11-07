@@ -163,7 +163,7 @@
       Description=Run Grayhaven Systems LLC restic integrity check weekly
 
       [Timer]
-      OnCalendar={{ restic_integrity_schedule }}
+      OnCalendar={{ restic_backup_integrity_schedule }}
       RandomizedDelaySec=30m
       Persistent=true
       Unit=grayhaven-restic-check.service

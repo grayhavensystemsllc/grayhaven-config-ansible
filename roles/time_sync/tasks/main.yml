@@ -7,9 +7,9 @@
 
 - name: Set system timezone
   ansible.builtin.command:
-    cmd: "timedatectl set-timezone {{ baseline_validation_timezone }}"
+    cmd: "timedatectl set-timezone {{ timezone }}"
   changed_when: true
-  when: time_sync_current_timezone.stdout != baseline_validation_timezone
+  when: time_sync_current_timezone.stdout != timezone
 
 - name: Configure chrony
   ansible.builtin.template:

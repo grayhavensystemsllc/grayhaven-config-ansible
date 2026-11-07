@@ -13,8 +13,8 @@
   vars:
     automation_runner_effective_is_control_node: >-
       {{
-        automation_runner_bootstrap_is_control_node
-        if automation_runner_bootstrap_is_control_node is defined
+        grayhaven_is_control_node
+        if grayhaven_is_control_node is defined
         else 'control-node' in (do_tags | default([]))
       }}
 
@@ -32,8 +32,8 @@
   vars:
     automation_runner_effective_is_control_node: >-
       {{
-        automation_runner_bootstrap_is_control_node
-        if automation_runner_bootstrap_is_control_node is defined
+        grayhaven_is_control_node
+        if grayhaven_is_control_node is defined
         else 'control-node' in (do_tags | default([]))
       }}
 
@@ -51,7 +51,7 @@
   vars:
     automation_runner_effective_is_control_node: >-
       {{
-        automation_runner_bootstrap_is_control_node
-        if automation_runner_bootstrap_is_control_node is defined
+        grayhaven_is_control_node
+        if grayhaven_is_control_node is defined
         else 'control-node' in (do_tags | default([]))
       }}

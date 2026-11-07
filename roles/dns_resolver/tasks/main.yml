@@ -30,11 +30,11 @@
     fail_msg: "Unable to determine the active NetworkManager connection for DNS management."
     quiet: true
 
-- name: Configure Quad9 DNS resolvers with NetworkManager
+- name: Configure DNS resolvers with NetworkManager
   community.general.nmcli:
     conn_name: "{{ dns_resolver_active_nm_connection }}"
     type: ethernet
-    dns4: "{{ dns_resolver_quad9_resolvers }}"
+    dns4: "{{ network.dns_resolvers }}"
     dns4_ignore_auto: true
     state: present
   register: dns_resolver_nmcli_dns
