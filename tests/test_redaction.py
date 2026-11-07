@@ -1,5 +1,6 @@
 """Test value protection using generated, entirely fictional input values."""
 
+from dataclasses import dataclass
 import unittest
 import uuid
 
@@ -104,3 +105,22 @@ class RedactionTests(unittest.TestCase):
         self.assertTrue(self.value not in display.message)
         self.assertEqual(display.options, {"color": "sample-color", "stderr": True})
         self.assertEqual(proxy.width, display.width)
+
+    def test_structured_display_events_keep_their_type_and_mask_values(self):
+        @dataclass(frozen=True)
+        class Event:
+            message: str
+            details: tuple
+            password: str
+
+        @dataclass(frozen=True)
+        class Summary:
+            event: Event
+
+        supplied = Summary(Event(self.value, (self.value,), self.value))
+        result = redaction.Redactor([self.value]).tree(supplied)
+        self.assertIsInstance(result, Summary)
+        self.assertIsInstance(result.event, Event)
+        self.assertIsInstance(result.event.details, tuple)
+        self.assertTrue(self.value not in str(result))
+        self.assertEqual(supplied.event.message, self.value)

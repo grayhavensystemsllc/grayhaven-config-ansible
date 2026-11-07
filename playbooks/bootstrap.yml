@@ -108,9 +108,11 @@
         owner: ansible
         group: ansible
         mode: "0600"
-        content: >-
-          {{ ([grayhaven_ansible_deploy_public_key, grayhaven_ansible_control_public_key]
-              | map('trim') | unique | join('\n')) ~ '\n' }}
+        content: |
+          {% for public_key in [grayhaven_ansible_deploy_public_key,
+                                grayhaven_ansible_control_public_key] | map('trim') | unique %}
+          {{ public_key }}
+          {% endfor %}
       no_log: true
 
     - name: Install bootstrap vault deploy private key on bastion hosts

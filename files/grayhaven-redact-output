@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import sys
@@ -93,6 +94,19 @@ class Redactor:
         return "".join(worker.line(line) for line in value.splitlines(keepends=True))
 
     def tree(self, value: Any) -> Any:
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return dataclasses.replace(
+                value,
+                **{
+                    field.name: (
+                        REDACTED
+                        if SENSITIVE.search(field.name)
+                        else self.tree(getattr(value, field.name))
+                    )
+                    for field in dataclasses.fields(value)
+                    if field.init
+                },
+            )
         if isinstance(value, dict):
             output = {}
             for key, child in value.items():
@@ -113,7 +127,7 @@ class Redactor:
                     and bool(SENSITIVE.search(child))
                     and "=" not in child
                 )
-            return output
+            return tuple(output) if isinstance(value, tuple) else output
         if isinstance(value, str):
             return self.text(value)
         if value is None or isinstance(value, (bool, int, float)):
