@@ -1072,8 +1072,15 @@ def container_capacity(
     path = (root / group.lstrip("/")).resolve()
     if not path.is_relative_to(root):
         raise ValueError("Invalid container cgroup")
-    current = int((path / "pids.current").read_text())
     maximum = (path / "pids.max").read_text().strip()
+    while maximum == "max" and path.parent != root and path != root:
+        # A delegated child inherits the container's limit from its parent.
+        parent = path.parent
+        if not (parent / "pids.max").exists():
+            break
+        path = parent
+        maximum = (path / "pids.max").read_text().strip()
+    current = int((path / "pids.current").read_text())
     limit = 0 if maximum == "max" else int(maximum)
     if current < 0 or limit < 0:
         raise ValueError("Invalid container capacity")

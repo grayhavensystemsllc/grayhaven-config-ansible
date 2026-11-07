@@ -74,6 +74,29 @@ class ProcessCapacityTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         collector.container_capacity("fixture-app", proc, groups)
 
+    def test_nested_container_group_uses_its_governing_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            proc, groups = root / "proc", root / "groups"
+            (proc / "24").mkdir(parents=True)
+            parent = groups / "container"
+            child = parent / "delegated"
+            child.mkdir(parents=True)
+            (proc / "24/cgroup").write_text("0::/container/delegated\n")
+            (child / "pids.current").write_text("3")
+            (child / "pids.max").write_text("max")
+            with mock.patch.object(
+                collector.subprocess, "run", return_value=mock.Mock(stdout="24")
+            ):
+                self.assertEqual(
+                    collector.container_capacity("fixture-app", proc, groups), (3, 0)
+                )
+                (parent / "pids.current").write_text("5")
+                (parent / "pids.max").write_text("30")
+                self.assertEqual(
+                    collector.container_capacity("fixture-app", proc, groups), (5, 30)
+                )
+
     def test_rendering_covers_enabled_disabled_and_failed_collection(self):
         config = {
             "host": {
