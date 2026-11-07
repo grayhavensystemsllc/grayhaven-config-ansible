@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOCAL_REPOSITORY={{ restic_backup_repository_path | quote }}
+REMOTE_ENABLED={{ 'true' if restic_backup_remote_gcs_enabled else 'false' }}
+REMOTE_REPOSITORY={{ restic_backup_remote_gcs_repository | default('') | quote }}
+PASSWORD_FILE=/etc/grayhaven/backup/restic-password
+RESTIC_CACHE_DIR=/var/cache/restic
+TEXTFILE_DIR=/var/lib/grayhaven/observability/textfile
+GCS_CREDENTIALS_FILE=/etc/grayhaven/backup/gcs-credentials.json
+GCS_PROJECT_ID={{ restic_backup_remote_gcs_project_id | default('') | quote }}
+OBSERVABILITY_DASHBOARD_LOG=/var/lib/grayhaven/observability/restic-check-dashboard.log
+
+export RESTIC_CACHE_DIR
+
+successful_repositories=()
+declare -A repository_check_duration_seconds
+
+write_ordered_dashboard_log() {
+  /usr/bin/python3 -c '
+from __future__ import annotations
+
+import datetime
+import os
+import pathlib
+import sys
+import time
+import uuid
+
+log_path = pathlib.Path(sys.argv[1])
+run_id = uuid.uuid4().hex
+run_start_ns = time.time_ns()
+
+
+def logfmt_value(value: str) -> str:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+
+
+def timestamp_from_ns(timestamp_ns: int) -> str:
+    seconds, nanoseconds = divmod(timestamp_ns, 1_000_000_000)
+    rendered = datetime.datetime.fromtimestamp(seconds, datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    return f"{rendered}.{nanoseconds:09d}Z"
+
+
+log_path.parent.mkdir(parents=True, exist_ok=True)
+with log_path.open("a", encoding="utf-8") as log_file:
+    os.chmod(log_path, 0o644)
+    for sequence, raw_line in enumerate(sys.stdin, start=1):
+        line = raw_line.rstrip("\n")
+        ordered_timestamp_ns = run_start_ns + sequence
+        log_file.write(
+            " ".join(
+                [
+                    f"ordered_at={logfmt_value(timestamp_from_ns(ordered_timestamp_ns))}",
+                    f"observed_at={logfmt_value(timestamp_from_ns(time.time_ns()))}",
+                    f"run_id={logfmt_value(run_id)}",
+                    f"sequence={sequence}",
+                    f"line={logfmt_value(line)}",
+                ]
+            )
+            + "\n"
+        )
+        log_file.flush()
+' "$OBSERVABILITY_DASHBOARD_LOG"
+}
+
+exec > >(/usr/bin/tee >(write_ordered_dashboard_log)) 2>&1
+
+check_repository() {
+  local repository=$1
+  local label=$2
+  local check_start
+
+  check_start="$(/usr/local/sbin/grayhaven-restic-duration)"
+
+  restic \
+    --repo "$repository" \
+    --password-file "$PASSWORD_FILE" \
+    check \
+    --read-data-subset=5%
+
+  repository_check_duration_seconds["$label"]="$(
+    /usr/local/sbin/grayhaven-restic-duration "$check_start"
+  )"
+  successful_repositories+=("$label")
+}
+
+check_repository "$LOCAL_REPOSITORY" local
+
+if [[ "$REMOTE_ENABLED" == "true" ]]; then
+  export GOOGLE_PROJECT_ID="$GCS_PROJECT_ID"
+  export GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS_FILE"
+  check_repository "$REMOTE_REPOSITORY" remote
+fi
+
+if [[ -d "$TEXTFILE_DIR" ]]; then
+  tmp_file="$(mktemp "${TEXTFILE_DIR}/restic-check.XXXXXX")"
+  check_timestamp="$(date +%s)"
+  {
+    printf '# HELP grayhaven_restic_repository_check_last_success_timestamp_seconds Last check by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_check_last_success_timestamp_seconds gauge\n'
+    for repository_label in "${successful_repositories[@]}"; do
+      printf 'grayhaven_restic_repository_check_last_success_timestamp_seconds{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        "$repository_label" \
+        "$check_timestamp"
+    done
+    printf '# HELP grayhaven_restic_repository_check_duration_seconds Last check duration by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_check_duration_seconds gauge\n'
+    for repository_label in "${successful_repositories[@]}"; do
+      printf 'grayhaven_restic_repository_check_duration_seconds{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        "$repository_label" \
+        "${repository_check_duration_seconds[$repository_label]}"
+    done
+  } > "$tmp_file"
+  chmod 0644 "$tmp_file"
+  mv "$tmp_file" "${TEXTFILE_DIR}/restic-check.prom"
+fi

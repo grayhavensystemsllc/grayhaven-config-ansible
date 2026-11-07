@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Read by Backupctl to verify repository selection support.
+# shellcheck disable=SC2034
+BACKUP_REPOSITORY_SELECTION=true
+LOCAL_REPOSITORY={{ restic_backup_repository_path | quote }}
+REMOTE_ENABLED={{ 'true' if restic_backup_remote_gcs_enabled else 'false' }}
+REMOTE_REPOSITORY={{ restic_backup_remote_gcs_repository | default('') | quote }}
+PASSWORD_FILE=/etc/grayhaven/backup/restic-password
+INCLUDE_FILE=/etc/grayhaven/backup/include
+EXCLUDE_FILE=/etc/grayhaven/backup/exclude
+KEEP_DAILY={{ restic_backup_keep_daily | quote }}
+TEXTFILE_DIR=/var/lib/grayhaven/observability/textfile
+RESTIC_CACHE_DIR=/var/cache/restic
+GCS_CREDENTIALS_FILE=/etc/grayhaven/backup/gcs-credentials.json
+GCS_PROJECT_ID={{ restic_backup_remote_gcs_project_id | default('') | quote }}
+OBSERVABILITY_DASHBOARD_LOG=/var/lib/grayhaven/observability/restic-backup-dashboard.log
+TIMETRACKER_BACKUP_ENABLED={{ 'true' if grayhaven_role == 'web' else 'false' }}
+TIMETRACKER_BACKUP_DIR={{ (timetracker.backup_dir if grayhaven_role == 'web' else '') | quote }}
+TIMETRACKER_BACKUP_RETENTION_DAYS={{ (timetracker.backup_retention_days | default(14)) | quote }}
+TIMETRACKER_CONTAINER=grayhaven-timetracker
+MCP_BACKUP_ENABLED={{ 'true' if grayhaven_role == 'mcp' else 'false' }}
+MCP_BACKUP_DIR={{ (mcp.backup_dir if grayhaven_role == 'mcp' else '') | quote }}
+MCP_BACKUP_RETENTION_DAYS={{ (mcp.backup_retention_days | default(14)) | quote }}
+
+if (( $# == 0 )); then
+  selected_repository=all
+elif (( $# == 2 )) && [[ "$1" == "--repo" ]]; then
+  selected_repository="$2"
+else
+  printf 'Usage: grayhaven-restic-backup [--repo all|local|remote]\n' >&2
+  exit 2
+fi
+backup_steps="$(/usr/local/sbin/grayhaven-restic-workflow select \
+  "$selected_repository" "$REMOTE_ENABLED")"
+
+export RESTIC_CACHE_DIR
+
+successful_repositories=()
+declare -A repository_backup_duration_seconds
+declare -A repository_restore_size_bytes
+declare -A repository_snapshot_count
+
+write_ordered_dashboard_log() {
+  /usr/bin/python3 -c '
+from __future__ import annotations
+
+import datetime
+import os
+import pathlib
+import sys
+import time
+import uuid
+
+log_path = pathlib.Path(sys.argv[1])
+run_id = uuid.uuid4().hex
+run_start_ns = time.time_ns()
+
+
+def logfmt_value(value: str) -> str:
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+
+
+def timestamp_from_ns(timestamp_ns: int) -> str:
+    seconds, nanoseconds = divmod(timestamp_ns, 1_000_000_000)
+    rendered = datetime.datetime.fromtimestamp(seconds, datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    return f"{rendered}.{nanoseconds:09d}Z"
+
+
+log_path.parent.mkdir(parents=True, exist_ok=True)
+with log_path.open("a", encoding="utf-8") as log_file:
+    os.chmod(log_path, 0o644)
+    for sequence, raw_line in enumerate(sys.stdin, start=1):
+        line = raw_line.rstrip("\n")
+        ordered_timestamp_ns = run_start_ns + sequence
+        log_file.write(
+            " ".join(
+                [
+                    f"ordered_at={logfmt_value(timestamp_from_ns(ordered_timestamp_ns))}",
+                    f"observed_at={logfmt_value(timestamp_from_ns(time.time_ns()))}",
+                    f"run_id={logfmt_value(run_id)}",
+                    f"sequence={sequence}",
+                    f"line={logfmt_value(line)}",
+                ]
+            )
+            + "\n"
+        )
+        log_file.flush()
+' "$OBSERVABILITY_DASHBOARD_LOG"
+}
+
+exec > >(/usr/bin/tee >(write_ordered_dashboard_log)) 2>&1
+
+restic_stats_restore_size_bytes() {
+  python3 -c '
+import json
+import sys
+
+for line in reversed(sys.stdin.read().splitlines()):
+    line = line.strip()
+    if line.startswith("{"):
+        print(int(json.loads(line).get("total_size", 0)))
+        break
+else:
+    raise SystemExit("restic stats did not return a JSON summary")
+'
+}
+
+create_mcp_backup() {
+  local backup_name pending_name
+  [[ "$MCP_BACKUP_ENABLED" == "true" ]] || return 0
+  systemctl is-active --quiet grayhaven-mcp.service
+  backup_name="mcp-$(date -u +%Y%m%dT%H%M%S%NZ).sqlite3"
+  pending_name=".${backup_name}.pending"
+  if ! podman exec grayhaven-mcp python -m connector.backup \
+    "$MCP_BACKUP_DIR/$pending_name"; then
+    rm -f -- "$MCP_BACKUP_DIR/$pending_name"
+    return 1
+  fi
+  mv -- "$MCP_BACKUP_DIR/$pending_name" "$MCP_BACKUP_DIR/$backup_name"
+}
+
+prune_mcp_backups() {
+  [[ "$MCP_BACKUP_ENABLED" == "true" ]] || return 0
+  find "$MCP_BACKUP_DIR" -maxdepth 1 -type f \
+    -name 'mcp-*.sqlite3' -mtime "+$MCP_BACKUP_RETENTION_DAYS" -delete
+}
+
+create_timetracker_backup() {
+  local backup_name
+  local pending_name
+
+  [[ "$TIMETRACKER_BACKUP_ENABLED" == "true" ]] || return 0
+  systemctl is-active --quiet grayhaven-timetracker.service
+
+  backup_name="timetracker-$(date -u +%Y%m%dT%H%M%S%NZ).sqlite3"
+  pending_name=".${backup_name}.pending"
+  rm -f -- "$TIMETRACKER_BACKUP_DIR/$pending_name"
+  if ! podman exec "$TIMETRACKER_CONTAINER" \
+    python scripts/database_maintenance.py backup \
+      /app/data/timetracker.sqlite3 \
+      /run/secrets/sqlcipher_passphrase \
+      "/app/backups/${pending_name}"; then
+    rm -f -- "$TIMETRACKER_BACKUP_DIR/$pending_name"
+    return 1
+  fi
+  if ! podman exec "$TIMETRACKER_CONTAINER" \
+    python scripts/database_maintenance.py verify \
+      "/app/backups/${pending_name}" \
+      /run/secrets/sqlcipher_passphrase; then
+    rm -f -- "$TIMETRACKER_BACKUP_DIR/$pending_name"
+    return 1
+  fi
+  mv -- \
+    "$TIMETRACKER_BACKUP_DIR/$pending_name" \
+    "$TIMETRACKER_BACKUP_DIR/$backup_name"
+}
+
+prune_timetracker_backups() {
+  [[ "$TIMETRACKER_BACKUP_ENABLED" == "true" ]] || return 0
+  find "$TIMETRACKER_BACKUP_DIR" \
+    -maxdepth 1 \
+    -type f \
+    -name 'timetracker-*.sqlite3' \
+    -mtime "+${TIMETRACKER_BACKUP_RETENTION_DAYS}" \
+    -delete
+}
+
+backup_repository() {
+  local repository=$1
+  local label=$2
+  local backup_start
+
+  backup_start="$(/usr/local/sbin/grayhaven-restic-duration)"
+
+  restic \
+    --repo "$repository" \
+    --password-file "$PASSWORD_FILE" \
+    backup \
+    --files-from "$INCLUDE_FILE" \
+    --exclude-file "$EXCLUDE_FILE" \
+    --tag "grayhaven-${label}" \
+    --host "$(hostname -f)"
+
+  restic \
+    --repo "$repository" \
+    --password-file "$PASSWORD_FILE" \
+    forget \
+    --keep-daily "$KEEP_DAILY" \
+    --group-by host \
+    --prune
+
+  repository_backup_duration_seconds["$label"]="$(
+    /usr/local/sbin/grayhaven-restic-duration "$backup_start"
+  )"
+  if [[ "$label" == "local" ]]; then
+    repository_restore_size_bytes["$label"]="$(
+      restic \
+        --repo "$repository" \
+        --password-file "$PASSWORD_FILE" \
+        stats latest \
+        --mode restore-size \
+        --json \
+        | restic_stats_restore_size_bytes
+    )"
+  fi
+  repository_snapshot_count["$label"]="$(
+    restic \
+      --repo "$repository" \
+      --password-file "$PASSWORD_FILE" \
+      snapshots \
+      --json \
+      | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))'
+  )"
+  successful_repositories+=("$label")
+}
+
+snapshot_prepared=false
+while IFS= read -r step; do
+  case "$step" in
+    snapshot)
+      [[ "$snapshot_prepared" == "false" ]] || exit 1
+      create_timetracker_backup
+      create_mcp_backup
+      snapshot_prepared=true
+      ;;
+    local)
+      [[ "$snapshot_prepared" == "true" ]] || exit 1
+      backup_repository "$LOCAL_REPOSITORY" local
+      ;;
+    remote)
+      [[ "$snapshot_prepared" == "true" ]] || exit 1
+      export GOOGLE_PROJECT_ID="$GCS_PROJECT_ID"
+      export GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS_FILE"
+      backup_repository "$REMOTE_REPOSITORY" remote
+      ;;
+    *)
+      printf 'Invalid backup workflow step\n' >&2
+      exit 1
+      ;;
+  esac
+done <<< "$backup_steps"
+[[ "$snapshot_prepared" == "true" && -v 'successful_repositories[0]' ]]
+
+prune_timetracker_backups
+prune_mcp_backups
+
+if [[ -d "$TEXTFILE_DIR" ]]; then
+  tmp_file="$(mktemp "${TEXTFILE_DIR}/restic.XXXXXX")"
+  backup_timestamp="$(date +%s)"
+  {
+    printf '# HELP grayhaven_restic_backup_last_success_timestamp_seconds Last successful backup time.\n'
+    printf '# TYPE grayhaven_restic_backup_last_success_timestamp_seconds gauge\n'
+    printf 'grayhaven_restic_backup_last_success_timestamp_seconds{host="%s"} %s\n' \
+      "$(hostname -f)" \
+      "$backup_timestamp"
+    printf '# HELP grayhaven_restic_repository_last_success_timestamp_seconds Last restic backup by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_last_success_timestamp_seconds gauge\n'
+    for repository_label in "${successful_repositories[@]}"; do
+      printf 'grayhaven_restic_repository_last_success_timestamp_seconds{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        "$repository_label" \
+        "$backup_timestamp"
+    done
+    printf '# HELP grayhaven_restic_repository_backup_duration_seconds Last backup duration by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_backup_duration_seconds gauge\n'
+    for repository_label in "${successful_repositories[@]}"; do
+      printf 'grayhaven_restic_repository_backup_duration_seconds{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        "$repository_label" \
+        "${repository_backup_duration_seconds[$repository_label]}"
+    done
+    printf '# HELP grayhaven_restic_repository_restore_size_bytes Latest restore-size bytes by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_restore_size_bytes gauge\n'
+    if [[ -v 'repository_restore_size_bytes[local]' ]]; then
+      printf 'grayhaven_restic_repository_restore_size_bytes{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        local \
+        "${repository_restore_size_bytes[local]}"
+    fi
+    printf '# HELP grayhaven_restic_repository_snapshot_count Restic snapshot count by repository.\n'
+    printf '# TYPE grayhaven_restic_repository_snapshot_count gauge\n'
+    for repository_label in "${successful_repositories[@]}"; do
+      printf 'grayhaven_restic_repository_snapshot_count{host="%s",repository="%s"} %s\n' \
+        "$(hostname -f)" \
+        "$repository_label" \
+        "${repository_snapshot_count[$repository_label]}"
+    done
+  } > "$tmp_file"
+  if [[ "$selected_repository" != "all" ]]; then
+    merged_file="$(mktemp "${TEXTFILE_DIR}/restic-merged.XXXXXX")"
+    if ! /usr/local/sbin/grayhaven-restic-workflow merge "${TEXTFILE_DIR}/restic.prom" \
+      "$tmp_file" "$(hostname -f)" "$selected_repository" > "$merged_file"; then
+      rm -f -- "$tmp_file" "$merged_file"
+      exit 1
+    fi
+    mv -- "$merged_file" "$tmp_file"
+  fi
+  chmod 0644 "$tmp_file"
+  mv "$tmp_file" "${TEXTFILE_DIR}/restic.prom"
+fi

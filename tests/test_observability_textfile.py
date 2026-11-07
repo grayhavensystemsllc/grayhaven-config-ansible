@@ -91,6 +91,8 @@ def full_config() -> dict[str, object]:
         "restic": {"repositories": ["local", "remote"]},
         "gcs": {
             "enabled": True,
+            "storage_status_product": {"title": "Fixture Storage", "id": "fixture-storage"},
+            "monitoring_status_product": {"title": "Fixture Monitoring", "id": "fixture-monitoring"},
             "credentials_file": "/credentials.json",
             "location": "EXAMPLE-EAST4",
             "monitoring_usage_cache_file": "/cache/monitoring.json",
@@ -852,9 +854,9 @@ class PublicStatusAndFail2banTests(unittest.TestCase):
         with mock.patch.object(
             collector, "google_cloud_status", return_value=("Operational", 1, 1)
         ) as status:
-            self.assertEqual(collector.gcs_status("US"), ("Operational", 1, 1))
+            self.assertEqual(collector.gcs_status("US", {"title": "Fixture Storage", "id": "fixture-storage"}), ("Operational", 1, 1))
             self.assertEqual(
-                collector.google_monitoring_status("US"), ("Operational", 1, 1)
+                collector.google_monitoring_status("US", {"title": "Fixture Monitoring", "id": "fixture-monitoring"}), ("Operational", 1, 1)
             )
         self.assertEqual(status.call_count, 2)
 

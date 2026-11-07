@@ -3,8 +3,37 @@
   hosts: all
   become: true
   gather_facts: false
+  any_errors_fatal: true
 
   pre_tasks:
+    - name: Load infrastructure identity
+      ansible.builtin.include_vars:
+        file: "{{ baseline_validation_vault_checkout_dir }}/infrastructure.yml"
+        name: infrastructure
+      no_log: true
+
+    - name: Load operational configuration
+      ansible.builtin.include_vars:
+        file: "{{ baseline_validation_vault_checkout_dir }}/operations.yml"
+      no_log: true
+
+    - name: Prepare managed inventory metadata before connecting
+      ansible.builtin.include_role:
+        name: managed_inventory
+
+    - name: Prepare controller hostname mappings before connecting  # noqa: run-once[task]
+      ansible.builtin.template:
+        src: "{{ playbook_dir | dirname }}/roles/host_identity/templates/hosts.j2"
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: "0644"
+      delegate_to: localhost
+      run_once: true
+      vars:
+        grayhaven_role: bastion
+        host_identity_local_inventory_name: "{{ lookup('env', 'GRAYHAVEN_HOSTNAME') }}"
+
     - name: Wait for managed hosts to accept Ansible connections
       ansible.builtin.wait_for_connection:
         delay: 5
@@ -50,7 +79,6 @@
 
   roles:
     - baseline_validation
-    - managed_inventory
     - swap
     - system_packages
     - automation_user

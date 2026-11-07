@@ -1,4 +1,1 @@
 ---
-dns_resolver_quad9_resolvers:
-  - 9.9.9.9
-  - 149.112.112.112

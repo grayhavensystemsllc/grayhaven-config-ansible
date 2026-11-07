@@ -1,3 +1,1 @@
 ---
-managed_inventory_network_vpc_cidr: "{{ grayhaven_network_vpc_cidr | default('') }}"
-managed_inventory_fallback_vpc_cidr: "{{ managed_inventory_network_vpc_cidr }}"

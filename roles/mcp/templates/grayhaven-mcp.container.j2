@@ -18,7 +18,7 @@ Environment=GRAYHAVEN_MCP_ENVIRONMENT={{ 'production' if baseline_validation_env
 Environment=TZ={{ baseline_validation_timezone }}
 DropCapability=all
 NoNewPrivileges=true
-PidsLimit=256
+PidsLimit={{ mcp_pids_limit }}
 RunInit=true
 ReadOnly=true
 Tmpfs=/tmp:rw,nosuid,nodev,size=128m

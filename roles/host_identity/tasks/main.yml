@@ -107,6 +107,7 @@
       private_ipv4: "{{ grayhaven_private_ipv4 | default('') }}"
       public_ipv4: "{{ grayhaven_public_ipv4 | default('') }}"
     automation_runner_host_is_control_node: "{{ 'control-node' in (do_tags | default([])) }}"
+  no_log: true
 
 - name: Install login issue banner
   ansible.builtin.template:

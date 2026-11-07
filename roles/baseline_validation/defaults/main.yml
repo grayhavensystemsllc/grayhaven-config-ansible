@@ -1,6 +1,1 @@
 ---
-baseline_validation_environment: "{{ grayhaven_environment | default('prod') }}"
-baseline_validation_timezone: "{{ grayhaven_timezone | default('America/Chicago') }}"
-baseline_validation_certificate_environment: "{{ grayhaven_certificate_environment | default('staging') }}"
-baseline_validation_tls_mode: "{{ grayhaven_tls_mode | default('host') }}"
-baseline_validation_vault_checkout_dir: "{{ grayhaven_vault_checkout_dir | default('/home/ansible/grayhaven-vault') }}"

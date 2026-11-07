@@ -6,6 +6,7 @@
       - users is sequence
     fail_msg: "The users variable must be defined as a list."
     quiet: true
+  no_log: true
 
 - name: Set managed user archive path
   ansible.builtin.set_fact:
@@ -14,6 +15,7 @@
         backup.repositories.local.homedir_archive_path
         | default(admin_access_default_homedir_archive_path)
       }}
+  no_log: true
 
 - name: Ensure managed user archive path exists
   ansible.builtin.file:
@@ -70,6 +72,7 @@
         | selectattr('state', 'equalto', 'absent')
         | list
       }}
+  no_log: true
 
 - name: Derive present sudo managed users
   ansible.builtin.set_fact:
@@ -80,6 +83,7 @@
         | selectattr('sudo')
         | list
       }}
+  no_log: true
 
 - name: Manage present users
   ansible.builtin.user:
@@ -154,6 +158,7 @@
   loop: "{{ admin_access_absent_users }}"
   loop_control:
     label: "{{ item.username }}"
+  no_log: true
 
 - name: Enforce managed sudo user audit rules
   ansible.builtin.import_tasks: audit.yml

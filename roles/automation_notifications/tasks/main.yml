@@ -23,6 +23,7 @@
     TZ: "{{ automation_notifications_timezone }}"
   register: automation_notifications_timestamp
   changed_when: false
+  no_log: true
 
 - name: Reset Discord notification retry state
   ansible.builtin.set_fact:

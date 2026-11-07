@@ -17,6 +17,7 @@
       GRAYHAVEN_IS_CONTROL_NODE={{ automation_runner_effective_control_node_string | quote }}
       GRAYHAVEN_CERTIFICATE_ENVIRONMENT={{ automation_runner_effective_certificate_environment | quote }}
       GRAYHAVEN_TLS_MODE={{ automation_runner_effective_tls_mode | quote }}
+      MANAGED_BASELINE_TIMEZONE={{ baseline_validation_timezone | quote }}
   when: grayhaven_role == "bastion"
   vars:
     automation_runner_effective_repo_url: >-
@@ -33,7 +34,7 @@
         automation_runner_bootstrap_vault_repo_url
         | default(
             automation_runner_vault_repo_url
-            | default('git@github.com:grayhavensystemsllc/grayhaven-vault.git')
+            | default(infrastructure.repositories.vault)
           )
       }}
     automation_runner_effective_vault_repo_ref: >-

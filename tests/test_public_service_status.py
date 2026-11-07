@@ -5,15 +5,12 @@ import unittest
 from unittest import mock
 
 from tests.helpers import load_program
-from tests.test_alert_sync import validator
 
 collector = load_program(
     "public_status_collector",
     "roles/observability/files/grayhaven-observability-textfile",
 )
-alerts = load_program(
-    "public_status_alerts", "roles/observability/files/grayhaven-grafana-alert-sync"
-)
+
 
 
 def providers():
@@ -123,39 +120,3 @@ class PublicStatusTests(unittest.TestCase):
                     metrics[0].startswith("grayhaven_example_telemetry_success{")
                 )
                 self.assertTrue(metrics[0].endswith(" 0"))
-
-    def test_rules_filter_component_identity_and_alert_on_collection_failure(self):
-        settings = {
-            "public_status": providers(),
-            "labels": {"client": "fixture", "environment": "test"},
-            "grafana": {
-                "evaluation_group": "fixture-group",
-                "contact_point": "fixture-contact",
-            },
-            "uid_registry": validator.FixtureRegistry(),
-        }
-        rules = alerts.public_status_rules(settings, "fixture-folder", "fixture-source")
-        self.assertEqual(len(rules), 1 + len(providers()["example"]["components"]))
-        self.assertEqual(
-            {rule["uid"] for rule in rules}, set(settings["uid_registry"].values())
-        )
-        telemetry = next(
-            rule
-            for rule in rules
-            if rule["labels"]["check"].endswith("telemetry_success")
-        )
-        self.assertEqual(telemetry["noDataState"], "Alerting")
-        for component, rule in zip(providers()["example"]["components"], rules[1:]):
-            self.assertIn(
-                'component="' + component["id"] + '"', rule["data"][0]["model"]["expr"]
-            )
-            self.assertEqual(
-                rule["data"][1]["model"]["conditions"][0]["evaluator"],
-                {"type": "lt", "params": [1]},
-            )
-            self.assertEqual(
-                rule["notification_settings"]["receiver"],
-                settings["grafana"]["contact_point"],
-            )
-        del settings["public_status"]
-        self.assertEqual(alerts.public_status_rules(settings, "folder", "source"), [])

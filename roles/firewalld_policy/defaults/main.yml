@@ -1,2 +1,1 @@
 ---
-firewalld_policy_ssh_args: -C -o ControlMaster=no -o ControlPersist=no -o ControlPath=none

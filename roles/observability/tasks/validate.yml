@@ -4,6 +4,7 @@
     observability_config: "{{ observability | default({}) }}"
     observability_grafana_config: "{{ (observability | default({})).grafana_cloud | default({}) }}"
     observability_grafana_credentials: "{{ grafana_cloud | default({}) }}"
+  no_log: true
 
 - name: Derive observability enablement flags
   ansible.builtin.set_fact:

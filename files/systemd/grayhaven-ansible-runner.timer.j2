@@ -2,7 +2,7 @@
 Description=Run Grayhaven Systems LLC Ansible full playbook daily
 
 [Timer]
-OnCalendar=*-*-* 03:17:00
+OnCalendar={{ automation_runner_schedule }}
 RandomizedDelaySec=15m
 Persistent=true
 Unit=grayhaven-ansible-runner.service

@@ -91,7 +91,7 @@ class ShellProgramTests(unittest.TestCase):
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
                     source files/grayhaven-ansible-runner
                     VAULT_CHECKOUT_DIR="$FIXTURE_ROOT"
-                    CHECKOUT_DIR="$FIXTURE_ROOT/config"
+                    CHECKOUT_DIR="$FIXTURE_CHECKOUT"
                     RUNNER_VARS="$FIXTURE_ROOT/vars"
                     RUNNER_PLAYBOOK_LOG="$FIXTURE_ROOT/playbook.log"
                     VAULT_PASSWORD_FILE="$FIXTURE_ROOT/password"
@@ -102,7 +102,7 @@ class ShellProgramTests(unittest.TestCase):
                     run_as_ansible() { printf '%s\\n' "$@"; }
                     run_convergence "$FIXTURE_ROOT/mock-dependency.yml"
                     """,
-                    env={"FIXTURE_ROOT": folder},
+                    env={"FIXTURE_ROOT": folder, "FIXTURE_CHECKOUT": str(REPO_ROOT)},
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(

@@ -48,6 +48,7 @@
         )
         + (backup.exclude | default([]))
       }}
+  no_log: true
 
 - name: Derive restic credential settings
   ansible.builtin.set_fact:
@@ -82,6 +83,7 @@
         )
         | unique
       }}
+  no_log: true
 
 - name: Derive optional remote backup settings
   ansible.builtin.set_fact:
@@ -127,7 +129,7 @@
           restic_backup_label_tags
           | select('match', '^client-')
           | first
-          | default('client-grayhaven')
+          | default('client-' ~ managed_client_name)
         )
         | regex_replace('^client-', '')
       }}

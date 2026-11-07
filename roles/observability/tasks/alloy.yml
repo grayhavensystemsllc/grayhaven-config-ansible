@@ -242,6 +242,8 @@
             + (['remote'] if (restic_backup_remote_gcs_enabled | default(false) | bool) else [])
           }}
       gcs:
+        storage_status_product: "{{ observability_gcs_status_product }}"
+        monitoring_status_product: "{{ observability_google_monitoring_status_product }}"
         enabled: "{{ restic_backup_remote_gcs_enabled | default(false) | bool }}"
         project_id: "{{ restic_backup_remote_gcs_project_id | default('') }}"
         location: "{{ restic_backup_remote_gcs_location | default('') }}"
@@ -257,23 +259,15 @@
         jails: "{{ observability_fail2ban_jails }}"
       proton:
         enabled: "{{ observability_host_is_control_node }}"
-        services:
-          - name: Mail
-            component_name: Proton Mail
-          - name: Calendar
-            component_name: Proton Calendar
-          - name: Pass
-            component_name: Proton Pass
-          - name: Lumo
-            component_name: Lumo by Proton
-          - name: Drive
-            component_name: Proton Drive
-          - name: VPN
-            component_name: Proton VPN
+        services: "{{ observability_proton_services }}"
+      process:
+        enabled: true
+        containers: "{{ observability_process_containers.get(grayhaven_role, []) }}"
       public_status:
         enabled: "{{ observability_host_is_control_node }}"
         providers: "{{ observability_public_status_services }}"
   when: observability_metrics_enabled
+  no_log: true
 
 - name: Install Grafana IRM alert-group textfile helper
   ansible.builtin.copy:
@@ -304,6 +298,7 @@
     content: "{{ observability_irm_alert_groups_config | to_nice_json }}\n"
   vars:
     observability_irm_alert_groups_config:
+      display_timezone: "{{ observability_display_timezone }}"
       grafana:
         stack_url: "{{ observability_grafana_credentials.stack_url }}"
         api_token: "{{ observability_grafana_credentials.irm_alert_groups.api_token }}"
@@ -401,7 +396,7 @@
       Description=Refresh Grayhaven Systems LLC stale GCS restic bucket textfile metrics
 
       [Timer]
-      OnCalendar=*-*-* 04:17:00
+      OnCalendar={{ observability_gcs_check_schedule }}
       RandomizedDelaySec=30m
       Persistent=true
       Unit=grayhaven-gcs-restic-stale-buckets.service

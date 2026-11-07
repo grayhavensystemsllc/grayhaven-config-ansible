@@ -12,15 +12,14 @@ include = [
   "files/grayhaven-reboot-notify",
   "files/grayhaven-refresh-motd",
   "files/grayhaven-ansible-automation-status",
+  "files/grayhaven-redact-output",
   "roles/deploy_websites/files/grayhaven-website-deploy",
   "roles/restic_backup/files/grayhaven-restic-duration",
   "roles/restic_backup/files/grayhaven-restic-workflow",
   "roles/observability/files/grayhaven-grafana-alert-sync",
   "roles/observability/files/grayhaven-irm-alert-groups-textfile",
   "roles/observability/files/grayhaven-observability-textfile",
-  "scripts/validate-generated-grafana-alerts",
-  "scripts/validate-rendered-alloy-config",
-  "scripts/validate-rendered-timetracker-config",
+  "roles/observability/files/grayhaven-gcs-restic-stale-buckets",
 ]
 relative_files = true
 

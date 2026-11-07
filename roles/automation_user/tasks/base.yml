@@ -7,6 +7,7 @@
     shell: /bin/bash
     password_lock: true
     state: present
+  no_log: true
 
 - name: Grant ansible passwordless sudo
   ansible.builtin.copy:
@@ -19,6 +20,7 @@
       Defaults:ansible !pam_session
       ansible ALL=(ALL) NOPASSWD: ALL
     validate: /usr/sbin/visudo -cf %s
+  no_log: true
 
 - name: Create ansible SSH directory
   ansible.builtin.file:

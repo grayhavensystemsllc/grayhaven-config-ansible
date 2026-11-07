@@ -123,6 +123,7 @@
       system_packages_ansible_runtime_requirements_marker.rc != 0 or
       system_packages_ansible_runtime_requirements_marker.stdout | default("") !=
       system_packages_ansible_runtime_requirements.stat.checksum
+  no_log: true
 
 - name: Install pinned Ansible runtime on bastion hosts
   ansible.builtin.command:
@@ -147,6 +148,7 @@
       system_packages_ansible_runtime_requirements_marker.rc != 0 or
       system_packages_ansible_runtime_requirements_marker.stdout | default("") !=
       system_packages_ansible_runtime_requirements.stat.checksum
+  no_log: true
 
 - name: Store Ansible runtime requirements marker on bastion hosts
   ansible.builtin.copy:
@@ -244,6 +246,7 @@
       system_packages_galaxy_requirements_marker.rc != 0 or
       system_packages_galaxy_requirements_marker.stdout | default("") !=
       system_packages_galaxy_requirements_checksum
+  no_log: true
 
 - name: Store Ansible Galaxy requirements marker on bastion hosts
   ansible.builtin.copy:

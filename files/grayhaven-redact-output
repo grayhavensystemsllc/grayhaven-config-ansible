@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Sanitize structured results and diagnostic streams before publication."""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+from typing import Any
+
+
+REDACTED = "[redacted]"
+SENSITIVE = re.compile(
+    r"password|passwd|passphrase|secret|token|authorization|credential|cookie|"
+    r"private[_-]?key|api[_-]?key|totp|(?:^|[_-])pat(?:$|[_-])",
+    re.I,
+)
+ENVIRONMENT = re.compile(r"(?:^|_)(?:env|environ|environment)(?:$|_)", re.I)
+QUOTED_OR_WORD = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)"""
+ASSIGNMENT = re.compile(
+    r"""(?P<prefix>["']?[\w-]*(?:password|passwd|passphrase|secret|token|authorization|credential|cookie|private[_-]?key|api[_-]?key|totp|github_pat)[\w-]*["']?\s*[:=]\s*)"""
+    + QUOTED_OR_WORD,
+    re.I,
+)
+ENV_ASSIGNMENT = re.compile(
+    r"""(?P<prefix>\b[A-Z_][A-Z0-9_]*\s*=\s*)""" + QUOTED_OR_WORD
+)
+AUTH_HEADER = re.compile(r"(?i)(authorization\s*:\s*)(?:basic|bearer)\s+[^\s\"',}]+")
+SECRET_FLAG = re.compile(
+    r"(?i)(--[\w-]*(?:password|passphrase|secret|token|api-key|github-pat)[\w-]*(?:=|\s+))"
+    + QUOTED_OR_WORD
+)
+USERINFO = re.compile(r"(https?://)[^/\s@]+@", re.I)
+WEBHOOK = re.compile(
+    r"https://(?:[\w.-]*\.)?discord(?:app)?\.com/api/webhooks/[^\s\"'<>]+", re.I
+)
+PRIVATE_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----")
+PRIVATE_END = re.compile(r"-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----")
+
+
+def collect_secret_values(
+    value: Any, sensitive: bool = False, seen: set[tuple[int, bool]] | None = None
+) -> set[str]:
+    """Collect comparison values without serializing arbitrary objects or cycles."""
+    seen = set() if seen is None else seen
+    values = set()
+    if isinstance(value, (dict, list, tuple)):
+        identity = (id(value), sensitive)
+        if identity in seen:
+            return values
+        seen.add(identity)
+    if isinstance(value, dict):
+        for key, child in value.items():
+            protected = sensitive or bool(SENSITIVE.search(str(key)))
+            protected = protected or (
+                bool(ENVIRONMENT.search(str(key))) and isinstance(child, dict)
+            )
+            values.update(collect_secret_values(child, protected, seen))
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            values.update(collect_secret_values(child, sensitive, seen))
+    elif sensitive and isinstance(value, str) and value:
+        values.add(value)
+    return values
+
+
+class Redactor:
+    def __init__(self, secret_values=()):
+        self.secret_values = set(secret_values)
+        self.private_block = False
+
+    def line(self, value: str) -> str:
+        newline = "\n" if value.endswith("\n") else ""
+        if self.private_block:
+            if PRIVATE_END.search(value):
+                self.private_block = False
+            return ""
+        if PRIVATE_BEGIN.search(value):
+            self.private_block = not bool(PRIVATE_END.search(value))
+            return REDACTED + newline
+        for secret in sorted(self.secret_values, key=len, reverse=True):
+            if secret:
+                value = value.replace(secret, REDACTED)
+        value = WEBHOOK.sub("https://discord.com/api/webhooks/" + REDACTED, value)
+        value = USERINFO.sub(lambda match: match.group(1) + REDACTED + "@", value)
+        value = AUTH_HEADER.sub(lambda match: match.group(1) + REDACTED, value)
+        value = SECRET_FLAG.sub(lambda match: match.group(1) + REDACTED, value)
+        value = ASSIGNMENT.sub(lambda match: match.group("prefix") + REDACTED, value)
+        return ENV_ASSIGNMENT.sub(lambda match: match.group("prefix") + REDACTED, value)
+
+    def text(self, value: str) -> str:
+        worker = Redactor(self.secret_values)
+        return "".join(worker.line(line) for line in value.splitlines(keepends=True))
+
+    def tree(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            output = {}
+            for key, child in value.items():
+                protected = bool(SENSITIVE.search(str(key)))
+                protected = protected or (
+                    bool(ENVIRONMENT.search(str(key))) and isinstance(child, dict)
+                )
+                output[key] = REDACTED if protected else self.tree(child)
+            return output
+        if isinstance(value, (list, tuple)):
+            output = []
+            protected_argument = False
+            for child in value:
+                output.append(REDACTED if protected_argument else self.tree(child))
+                protected_argument = (
+                    isinstance(child, str)
+                    and child.startswith("--")
+                    and bool(SENSITIVE.search(child))
+                    and "=" not in child
+                )
+            return output
+        if isinstance(value, str):
+            return self.text(value)
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return "[unsupported value omitted]"
+
+
+class SafeDisplay:
+    """Filter display calls while preserving the wrapped display interface."""
+
+    def __init__(self, display, redactor):
+        self._wrapped_display = display
+        self._redactor = redactor
+
+    def __getattr__(self, name):
+        attribute = getattr(self._wrapped_display, name)
+        if not callable(attribute):
+            return attribute
+
+        def filtered(*arguments, **keywords):
+            return attribute(
+                *(self._redactor.tree(value) for value in arguments),
+                **{key: self._redactor.tree(value) for key, value in keywords.items()},
+            )
+
+        return filtered
+
+
+def main() -> int:  # pragma: no cover - stream entry point
+    redactor = Redactor(collect_secret_values(dict(os.environ)))
+    for line in sys.stdin:
+        sys.stdout.write(redactor.line(line))
+        sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

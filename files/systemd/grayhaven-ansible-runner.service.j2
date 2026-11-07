@@ -11,4 +11,4 @@ WorkingDirectory=/home/ansible/ansible-runner
 ExecStart=/usr/local/sbin/grayhaven-ansible-runner
 # Keep convergence near or below 70% total CPU on the bastion.
 CPUAccounting=yes
-CPUQuota=55%
+CPUQuota={{ automation_runner_cpu_quota_percent }}%

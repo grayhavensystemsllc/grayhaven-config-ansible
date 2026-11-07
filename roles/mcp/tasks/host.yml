@@ -31,8 +31,8 @@
       - "'.' not in mcp.backup_dir.split('/')"
       - mcp_secrets.config_passphrase is string
       - mcp_secrets.config_passphrase | length > 0
-      - mcp_secrets.registry_username | length > 0
-      - mcp_secrets.registry_token | length > 0
+      - mcp_secrets.github_username | length > 0
+      - mcp_secrets.github_pat | length > 0
       - deploy_websites_certbot_email | length > 0
       - digitalocean_dns_api_token | length > 0
     fail_msg: Required MCP deployment configuration is missing or unsafe.
@@ -129,6 +129,7 @@
     shell: /sbin/nologin
     password: "!"
     system: true
+  no_log: true
 
 - name: Create persistent MCP directories without replacing contents
   ansible.builtin.file:
@@ -145,6 +146,7 @@
     - "{{ mcp.sessions_dir }}"
     - "{{ mcp.backup_dir }}"
     - "{{ mcp_root }}/.ssh"
+  no_log: true
 
 - name: Persist MCP verified SSH host keys
   ansible.builtin.template:
@@ -166,8 +168,8 @@
 - name: Authenticate the private container registry
   containers.podman.podman_login:
     registry: ghcr.io
-    username: "{{ mcp_secrets.registry_username }}"
-    password: "{{ mcp_secrets.registry_token }}"
+    username: "{{ mcp_secrets.github_username }}"
+    password: "{{ mcp_secrets.github_pat }}"
     authfile: /root/.config/containers/grayhaven-mcp-auth.json
   no_log: true
 
@@ -181,7 +183,7 @@
   ansible.builtin.uri:
     url: "{{ mcp_configuration_api_url }}/commits/main"
     headers:
-      Authorization: "Bearer {{ mcp_secrets.registry_token }}"
+      Authorization: "Bearer {{ mcp_secrets.github_pat }}"
       Accept: application/vnd.github+json
     unredirected_headers:
       - Authorization
@@ -213,7 +215,7 @@
           {{ mcp_configuration_api_url }}/contents/{{ mcp_configuration_environment }}/{{ item
           }}?ref={{ mcp_configuration_commit.json.sha }}
         headers:
-          Authorization: "Bearer {{ mcp_secrets.registry_token }}"
+          Authorization: "Bearer {{ mcp_secrets.github_pat }}"
           Accept: application/vnd.github.raw+json
         unredirected_headers:
           - Authorization

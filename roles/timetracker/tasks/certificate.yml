@@ -49,6 +49,7 @@
       or not timetracker_certificate_marker_file.stat.exists
       or (timetracker_certificate_marker.content | default('') | b64decode | trim)
       != timetracker_certificate_environment
+  no_log: true
 
 - name: Record Time Tracker certificate environment
   ansible.builtin.copy:

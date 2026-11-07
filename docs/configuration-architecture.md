@@ -37,7 +37,8 @@ The bootstrap playbook prepares the host for management:
   bursts;
 - creates the password-locked `ansible` automation user;
 - grants the `ansible` user passwordless sudo;
-- installs the bootstrap deployment public key for first-boot `ansible` access;
+- installs the bootstrap and current control public keys for first-boot
+  `ansible` access;
 - installs the vault deployment key and temporary first-boot automation key on
   bastion hosts;
 - stores the Ansible Vault password only on bastion hosts;
@@ -67,8 +68,9 @@ version-pinned Ansible Galaxy collections under the ansible-owned
 `/home/ansible/ansible-runner` workspace. Ansible commands from that virtual
 environment are linked into `/usr/local/bin` for operator use without changing
 ownership of the virtual environment. The runner decrypts vault values through
-Ansible Vault, prepares first-convergence SSH known hosts when the bootstrap
-bridge file is present, and runs `playbooks/site.yml`.
+Ansible Vault, prepares SSH host keys for newly discovered hosts, and runs
+`playbooks/site.yml`. Existing managed host-key trust is preserved. The playbook
+refreshes controller hostname mappings before connecting to managed hosts.
 
 `grayhaven-vault` SSH access uses the vault deployment SSH key stored at
 `/home/ansible/.ssh/grayhaven_vault_deploy_key` on bastion hosts. Repository SSH
@@ -114,8 +116,11 @@ Its structure follows the
 [file schema](https://github.com/grayhavensystemsllc/grayhaven-vault-example/blob/main/docs/schema.md)
 documented in the
 [grayhaven-vault-example](https://github.com/grayhavensystemsllc/grayhaven-vault-example)
-repository. The `config.yml` and `firewall.yml` files remain plaintext, and the
-`vault/*.yml` files are decrypted by Ansible at runtime.
+repository. `infrastructure.yml`, `operations.yml`, `config.yml`, and
+`firewall.yml` remain plaintext. Runtime role settings come from `operations.yml`;
+`config.yml` overrides matching environment settings. Production alert definitions
+and UID mappings are loaded from `grafana-alert-rules.yml` and
+`grafana-alert-rule-uids.yml`. Files under `vault/` are decrypted at runtime.
 
 Production reads the vault `main` branch. Staging reads the vault `staging`
 branch.
@@ -155,8 +160,8 @@ smaller task boundaries. The baseline covers:
 - Quad9 DNS resolvers through NetworkManager;
 - AlmaLinux time synchronization;
 - firewalld inbound rules from the vault firewall policy;
-- local host aliases such as `grayhaven-core-prod-web-01` and
-  `grayhaven-core-prod-web-01.internal`;
+- local host aliases such as `example-app-prod-web-01` and
+  `example-app-prod-web-01.internal`;
 - local Ansible facts at `/etc/ansible/facts.d/grayhaven.fact`;
 - root-only Discord webhook configuration for post-reboot notifications;
 - local encrypted restic backups.
@@ -509,7 +514,7 @@ The unit-testing boundary has these limitations:
   failures, and remote responses are represented with temporary paths and
   controlled test doubles.
 - It tests Python and shell programs, not Ansible playbooks, roles, modules, or
-  convergence behavior. Ansible syntax checks, linting, contract playbooks,
+  convergence behavior. Ansible syntax checks, linting,
   staging convergence, and production convergence are separate validation
   layers.
 - It does not prove live systemd, Podman, SELinux, Nginx, restic, Grafana,
@@ -520,9 +525,6 @@ The unit-testing boundary has these limitations:
 - Direct command-entry wrappers and their final process-exit handling may not
   be included in coverage when the underlying `main()` behavior is already
   exercised directly.
-- Generated-configuration validators verify selected security and operational
-  contracts. They do not replace applying the rendered configuration to a
-  representative managed environment.
 - Timing, concurrency, service-restart ordering, and failure recovery across
   multiple hosts remain integration and operational concerns.
 

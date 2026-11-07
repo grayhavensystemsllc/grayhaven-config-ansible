@@ -208,7 +208,7 @@ documented in
 
 On first convergence for a new control node, Ansible creates a short Grafana
 Cloud silence matching the managed alert labels `configured_by=ansible`,
-`client=grayhaven`, and `environment=prod` before syncing managed alert rules.
+the configured client and environment labels before syncing managed alert rules.
 The silence gives new hosts time to settle and gives Alloy time to send initial
 telemetry before alert evaluation begins. A local marker prevents normal
 convergence from creating the silence again on the same control node.
@@ -255,5 +255,11 @@ managed by this repository.
 Changing Grafana Cloud enablement or log shipping requires a normal Ansible
 convergence run. When alert rules are updated, the sync helper honors Grafana
 Cloud API rate-limit responses before retrying.
+
+Alert definitions and stable UID overrides are supplied by the production Vault
+branch. The sync helper renders them using generic helpers and a context without
+API credentials. Host process measurements count kernel tasks and zombies without
+reading process arguments or environments. Container task measurements use each
+configured container's cgroup PID count and limit.
 
 [Back to top](#observability-architecture)

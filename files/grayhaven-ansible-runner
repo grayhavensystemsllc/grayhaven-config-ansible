@@ -18,6 +18,7 @@ ANSIBLE_CONTROL_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/id_ed25519"
 VAULT_DEPLOY_PRIVATE_KEY="${ANSIBLE_HOME}/.ssh/grayhaven_vault_deploy_key"
 GITHUB_KNOWN_HOSTS="${ANSIBLE_HOME}/.ssh/github_known_hosts"
 INVENTORY_KNOWN_HOSTS="${ANSIBLE_HOME}/.ssh/known_hosts"
+INVENTORY_GLOBAL_KNOWN_HOSTS="/etc/ssh/ssh_known_hosts"
 GITHUB_META_URL="https://api.github.com/meta"
 ANSIBLE_RUNTIME_VENV="${ANSIBLE_HOME}/ansible-runner/ansible-runtime"
 ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_HOME}/.ansible/collections"
@@ -26,7 +27,7 @@ ANSIBLE_GALAXY_REQUIREMENTS_MARKER="${ANSIBLE_COLLECTIONS_PATH}/.grayhaven-galax
 CHECKOUT_PARENT="${ANSIBLE_HOME}"
 DEFAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-config-ansible"
 DEFAULT_VAULT_CHECKOUT_DIR="${ANSIBLE_HOME}/grayhaven-vault"
-DEFAULT_REPO_URL="https://github.com/grayhavensystemsllc/grayhaven-config-ansible.git"
+DEFAULT_REPO_URL=""
 DEFAULT_REPO_REF="main"
 ANSIBLE_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible"
 ANSIBLE_GALAXY_BIN="${ANSIBLE_RUNTIME_VENV}/bin/ansible-galaxy"
@@ -369,7 +370,10 @@ send_failure_notification() {
   fi
 
   DISCORD_TARGET="$failed_targets"
-  DISCORD_TIMESTAMP="$(TZ="${MANAGED_BASELINE_TIMEZONE:-America/Chicago}" date '+%Y-%m-%d %I:%M %p %Z')"
+  if [[ -n "${MANAGED_BASELINE_TIMEZONE:-}" ]]; then
+    export TZ="$MANAGED_BASELINE_TIMEZONE"
+  fi
+  DISCORD_TIMESTAMP="$(date '+%Y-%m-%d %-I:%M %p %Z')"
   export DISCORD_TARGET DISCORD_TIMESTAMP
 
   /usr/bin/python3 - <<'PY' | curl --fail --silent --show-error --retry 3 --retry-max-time 300 \
@@ -505,11 +509,6 @@ prepare_inventory_known_hosts() {
   local key_type
   local key_body
 
-  if [[ ! -f "$INVENTORY_KNOWN_HOSTS" ]]; then
-    log "Temporary inventory known-hosts bridge is absent; using managed global SSH known hosts."
-    return 0
-  fi
-
   inventory_json="$(mktemp)"
   run_as_ansible "$ANSIBLE_INVENTORY_BIN" \
     --inventory "${CHECKOUT_DIR}/inventory" \
@@ -559,6 +558,11 @@ PY
 
   while IFS=$'\t' read -r host_alias ssh_target; do
     [[ -n "$host_alias" && -n "$ssh_target" ]] || continue
+
+    # Existing trusted keys remain authoritative; scan only newly added targets.
+    if ssh-keygen -F "$ssh_target" -f "$INVENTORY_GLOBAL_KNOWN_HOSTS" >/dev/null 2>&1; then
+      continue
+    fi
 
     scan_output="$(ssh-keyscan -T 5 -t ed25519 "$ssh_target" 2>/dev/null)"
     if [[ -z "$scan_output" ]]; then
@@ -813,7 +817,13 @@ render_runner_vars() {
 import json
 import os
 
+import yaml
+
+with open(os.path.join(os.environ["VAULT_CHECKOUT_DIR"], "infrastructure.yml"), encoding="utf-8") as source:
+    infrastructure = yaml.safe_load(source)
+
 vars_to_render = {
+    "infrastructure": infrastructure,
     "automation_runner_config_repo_ref": os.environ["REPO_REF"],
     "automation_runner_vault_repo_url": os.environ["VAULT_REPO_URL"],
     "baseline_validation_vault_checkout_dir": os.environ["VAULT_CHECKOUT_DIR"],
@@ -854,6 +864,7 @@ prepare_runner_runtime() {
   REPO_REF="${REPO_REF:-$DEFAULT_REPO_REF}"
   CHECKOUT_DIR="${CHECKOUT_DIR:-$DEFAULT_CHECKOUT_DIR}"
   VAULT_CHECKOUT_DIR="${VAULT_CHECKOUT_DIR:-$DEFAULT_VAULT_CHECKOUT_DIR}"
+  require_env REPO_URL
   require_env VAULT_REPO_URL
   require_env VAULT_REPO_REF
   require_env GRAYHAVEN_ENVIRONMENT
@@ -918,12 +929,15 @@ run_convergence() {
     --inventory "${CHECKOUT_DIR}/inventory" \
     "${CHECKOUT_DIR}/playbooks/site.yml" \
     --vault-password-file "$VAULT_PASSWORD_FILE" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/operations.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/config.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/common.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/bastion.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/web.yml" \
     "${mcp_vars[@]}" \
-    --extra-vars "@${RUNNER_VARS}" 2>&1 | tee "$RUNNER_PLAYBOOK_LOG" | write_ordered_runner_log
+    --extra-vars "@${RUNNER_VARS}" 2>&1 \
+    | /usr/bin/python3 "${CHECKOUT_DIR}/files/grayhaven-redact-output" \
+    | tee "$RUNNER_PLAYBOOK_LOG" | write_ordered_runner_log
 }
 
 run_gcs_restic_bucket_cleanup() {
@@ -940,6 +954,7 @@ run_gcs_restic_bucket_cleanup() {
     --inventory "${CHECKOUT_DIR}/inventory" \
     "${CHECKOUT_DIR}/playbooks/cleanup-gcs-restic-buckets.yml" \
     --vault-password-file "$VAULT_PASSWORD_FILE" \
+    --extra-vars "@${VAULT_CHECKOUT_DIR}/operations.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/config.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/common.yml" \
     --extra-vars "@${VAULT_CHECKOUT_DIR}/vault/bastion.yml" \

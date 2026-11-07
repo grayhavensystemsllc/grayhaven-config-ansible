@@ -73,10 +73,6 @@ GCS_OPERATION_CLASSES = {
 GCS_OPERATION_CLASSES_REPORTED = ("Class A", "Class B")
 GOOGLE_CLOUD_PRODUCTS_URL = "https://status.cloud.google.com/products.json"
 GOOGLE_CLOUD_INCIDENTS_URL = "https://status.cloud.google.com/incidents.json"
-GOOGLE_CLOUD_STORAGE_PRODUCT_TITLE = "Google Cloud Storage"
-GOOGLE_CLOUD_STORAGE_PRODUCT_ID = "UwaYoXQ5bHYHG6EdiPB8"
-GOOGLE_CLOUD_MONITORING_PRODUCT_TITLE = "Cloud Monitoring"
-GOOGLE_CLOUD_MONITORING_PRODUCT_ID = "3zaaDb7antc73BM1UAVT"
 PROTON_COMPONENTS_URL = "https://status.proton.me/api/v2/components.json"
 PROTON_STATUS_OPERATIONAL = "operational"
 
@@ -572,18 +568,18 @@ def google_cloud_status(
     return "Operational", 1, 1
 
 
-def gcs_status(configured_location: str) -> tuple[str, int, int]:
+def gcs_status(configured_location: str, product: dict[str, str]) -> tuple[str, int, int]:
     return google_cloud_status(
-        GOOGLE_CLOUD_STORAGE_PRODUCT_TITLE,
-        GOOGLE_CLOUD_STORAGE_PRODUCT_ID,
+        product["title"],
+        product["id"],
         configured_location,
     )
 
 
-def google_monitoring_status(configured_location: str) -> tuple[str, int, int]:
+def google_monitoring_status(configured_location: str, product: dict[str, str]) -> tuple[str, int, int]:
     return google_cloud_status(
-        GOOGLE_CLOUD_MONITORING_PRODUCT_TITLE,
-        GOOGLE_CLOUD_MONITORING_PRODUCT_ID,
+        product["title"],
+        product["id"],
         configured_location,
     )
 
@@ -753,9 +749,9 @@ def render_gcs_metrics(config: dict[str, Any]) -> list[str]:
         "location": gcs_config.get("location", ""),
         "project_id": gcs_config.get("project_id", ""),
     }
-    status, status_value, service_telemetry_success = gcs_status(str(gcs_config.get("location", "")))
+    status, status_value, service_telemetry_success = gcs_status(str(gcs_config.get("location", "")), gcs_config["storage_status_product"])
     status_labels = dict(metric_base)
-    status_labels["product"] = GOOGLE_CLOUD_STORAGE_PRODUCT_TITLE
+    status_labels["product"] = gcs_config["storage_status_product"]["title"]
     status_labels["status"] = status
 
     output = [
@@ -829,10 +825,10 @@ def render_google_monitoring_metrics(config: dict[str, Any]) -> list[str]:
         "project_id": gcs_config.get("project_id", ""),
     }
     status, status_value, service_telemetry_success = google_monitoring_status(
-        str(gcs_config.get("location", ""))
+        str(gcs_config.get("location", "")), gcs_config["monitoring_status_product"]
     )
     status_labels = dict(metric_base)
-    status_labels["product"] = GOOGLE_CLOUD_MONITORING_PRODUCT_TITLE
+    status_labels["product"] = gcs_config["monitoring_status_product"]["title"]
     status_labels["status"] = status
     output = [
         (
@@ -1032,6 +1028,84 @@ def render_fail2ban_metrics(config: dict[str, Any]) -> list[str]:
     return output
 
 
+def process_capacity(proc_root: pathlib.Path = pathlib.Path("/proc")) -> tuple[int, int, int]:
+    """Count kernel tasks and zombies without inspecting arguments or environment."""
+    limits = [int((proc_root / "sys/kernel" / name).read_text()) for name in ("pid_max", "threads-max")]
+    if min(limits) <= 0:
+        raise ValueError("Invalid process capacity")
+    tasks = zombies = 0
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            status = dict(
+                line.split(":", 1) for line in (entry / "status").read_text().splitlines()
+                if ":" in line
+            )
+        except FileNotFoundError:
+            continue  # Processes may exit while /proc is being sampled.
+        threads = int(status["Threads"].strip())
+        if threads < 1:
+            raise ValueError("Invalid task count")
+        tasks += threads
+        zombies += int(status["State"].strip().startswith("Z"))
+    return tasks, min(limits), zombies
+
+
+def container_capacity(
+    name: str,
+    proc_root: pathlib.Path = pathlib.Path("/proc"),
+    cgroup_root: pathlib.Path = pathlib.Path("/sys/fs/cgroup"),
+) -> tuple[int, int]:
+    result = subprocess.run(
+        ["podman", "inspect", "--format", "{{.State.Pid}}", name],
+        capture_output=True, text=True, check=True, timeout=10,
+    )
+    pid = int(result.stdout.strip())
+    if pid < 1:
+        raise ValueError("Container is not running")
+    entries = (proc_root / str(pid) / "cgroup").read_text().splitlines()
+    group = next((entry[3:] for entry in entries if entry.startswith("0::")), None)
+    if group is None:
+        raise ValueError("Unified container cgroup is unavailable")
+    root = cgroup_root.resolve()
+    path = (root / group.lstrip("/")).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("Invalid container cgroup")
+    current = int((path / "pids.current").read_text())
+    maximum = (path / "pids.max").read_text().strip()
+    limit = 0 if maximum == "max" else int(maximum)
+    if current < 0 or limit < 0:
+        raise ValueError("Invalid container capacity")
+    return current, limit
+
+
+def render_process_metrics(config: dict[str, Any]) -> list[str]:
+    settings = config.get("process", {})
+    if not settings.get("enabled"):
+        return []
+    base = host_labels(config["host"])
+    output = []
+    try:
+        tasks, limit, zombies = process_capacity()
+        output.extend([
+            line("grayhaven_host_process_tasks", base, tasks),
+            line("grayhaven_host_process_capacity", base, limit),
+            line("grayhaven_host_zombies", base, zombies),
+        ])
+        for name in settings.get("containers", []):
+            current, maximum = container_capacity(name)
+            output.extend([
+                line("grayhaven_container_tasks", {**base, "container": name}, current),
+                line("grayhaven_container_task_limit", {**base, "container": name}, maximum),
+            ])
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        output.append(line("grayhaven_process_telemetry_success", base, 0))
+    else:
+        output.append(line("grayhaven_process_telemetry_success", base, 1))
+    return output
+
+
 def render(config: dict[str, Any]) -> str:
     current_host = config["host"]
     output = [
@@ -1072,6 +1146,7 @@ def render(config: dict[str, Any]) -> str:
     output.extend(render_google_monitoring_metrics(config))
     output.extend(render_proton_metrics(config))
     output.extend(render_public_status_metrics(config))
+    output.extend(render_process_metrics(config))
 
     return "\n".join(output) + "\n"
 

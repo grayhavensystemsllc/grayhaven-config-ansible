@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import copy
+import hashlib
 from datetime import datetime, timedelta, timezone
 import json
 import re
@@ -15,31 +18,16 @@ import urllib.request
 import uuid
 from typing import Any
 
+from jinja2 import StrictUndefined, TemplateError
+from jinja2.sandbox import SandboxedEnvironment
+import yaml
+
 MANAGED_LABEL = "configured_by"
 MANAGED_VALUE = "ansible"
-RUNNER_UNIT = "grayhaven-ansible-runner.service"
 INITIAL_SILENCE_CREATED_BY = "grayhaven-grafana-alert-sync"
 INITIAL_SILENCE_COMMENT = (
     "Initial Grayhaven Systems LLC convergence silence while new hosts "
     "settle and Alloy sends initial telemetry."
-)
-PROTON_SERVICES = [
-    ("Mail", "Proton Mail"),
-    ("Calendar", "Proton Calendar"),
-    ("Pass", "Proton Pass"),
-    ("Lumo", "Lumo by Proton"),
-    ("Drive", "Proton Drive"),
-    ("VPN", "Proton VPN"),
-]
-COMMA_INTEGER_TEMPLATE = (
-    '{{ $value := printf "%.0f" $values.A.Value }}'
-    '{{ if match "^[0-9]{10,12}$" $value }}'
-    '{{ reReplaceAll "^([0-9]{1,3})([0-9]{3})([0-9]{3})([0-9]{3})$" "${1},${2},${3},${4}" $value }}'
-    '{{ else if match "^[0-9]{7,9}$" $value }}'
-    '{{ reReplaceAll "^([0-9]{1,3})([0-9]{3})([0-9]{3})$" "${1},${2},${3}" $value }}'
-    '{{ else if match "^[0-9]{4,6}$" $value }}'
-    '{{ reReplaceAll "^([0-9]{1,3})([0-9]{3})$" "${1},${2}" $value }}'
-    "{{ else }}{{ $value }}{{ end }}"
 )
 
 
@@ -82,8 +70,7 @@ class GrafanaClient:
                     time.sleep(delay)
                     continue
 
-                message = error.read().decode("utf-8", errors="replace")
-                raise GrafanaError(f"{method} {path} failed with HTTP {error.code}: {message}") from error
+                raise GrafanaError(f"{method} {path} failed with HTTP {error.code}") from error
 
             if status not in expected:
                 raise GrafanaError(f"{method} {path} returned unexpected HTTP status {status}")
@@ -174,8 +161,8 @@ def valid_rule_uid(uid: str) -> bool:
 def load_uid_registry(path: str) -> dict[str, str]:
     with open(path, encoding="utf-8") as registry_file:
         registry = json.load(registry_file)
-    if not isinstance(registry, dict) or not registry:
-        raise GrafanaError("Grafana alert UID registry must be a non-empty object")
+    if not isinstance(registry, dict):
+        raise GrafanaError("Grafana alert UID registry must be an object")
     if not all(
         isinstance(identity, str)
         and identity
@@ -190,10 +177,9 @@ def load_uid_registry(path: str) -> dict[str, str]:
 
 
 def rule_uid(identity: str, registry: dict[str, str]) -> str:
-    try:
-        return registry[identity]
-    except KeyError as error:
-        raise GrafanaError(f"Grafana alert UID is not registered for {identity!r}") from error
+    if not isinstance(identity, str) or not identity.strip():
+        raise GrafanaError("Grafana alert identity must be a non-empty string")
+    return registry.get(identity, "gh-" + hashlib.sha256(identity.encode()).hexdigest()[:24])
 
 
 def host_rule_identity(host: dict[str, Any], check: str) -> str:
@@ -353,7 +339,11 @@ def host_selector(host: str) -> str:
     return f'host="{promql_string(host)}"'
 
 
-def dependency_state_queries(config: dict[str, Any], dependency: str) -> tuple[str | None, str, int]:
+def dependency_state_queries(
+    config: dict[str, Any], dependency: str, *, freshness_window: str, settle_window: str,
+) -> tuple[str | None, str, int]:
+    duration_seconds(freshness_window)
+    duration_seconds(settle_window)
     control_hosts = sorted({host["fqdn"] for host in config["hosts"] if host.get("control_node")})
     if not control_hosts:
         return None, "vector(0)", 1
@@ -364,10 +354,10 @@ def dependency_state_queries(config: dict[str, Any], dependency: str) -> tuple[s
         f'name="{promql_string(dependency)}",state=~"active|activating"}}'
     )
     # Both state series must be fresh before a previous active sample can suppress CPU.
-    fresh = f"(count by (host) (count by (host, state) (last_over_time({selector}[2m]))) == 2)"
+    fresh = f"(count by (host) (count by (host, state) (last_over_time({selector}[{freshness_window}]))) == 2)"
     reporting = f"(count({fresh}) or vector(0))"
-    # Include the one-minute scrape interval in the 15-minute settling period.
-    recent = f"(max by (host) (max_over_time({selector}[16m])) > 0)"
+    # The configured settling window includes the scrape interval.
+    recent = f"(max by (host) (max_over_time({selector}[{settle_window}])) > 0)"
     suppress = (
         f"(max({recent} and on (host) {fresh}) "
         f"and on () ({reporting} == {len(control_hosts)}))"
@@ -375,991 +365,111 @@ def dependency_state_queries(config: dict[str, Any], dependency: str) -> tuple[s
     return suppress, reporting, len(control_hosts)
 
 
-def runner_state_metric_rule(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> dict[str, Any]:
-    _, reporting, expected = dependency_state_queries(config, RUNNER_UNIT)
-    return alert_rule(
-        identity=service_rule_identity("Ansible", "ansible_runner_state_metric"),
-        uid_registry=config["uid_registry"],
-        title="Ansible runner state metric",
-        folder_uid=folder_uid,
-        rule_group=config["grafana"]["evaluation_group"],
-        datasource_uid=datasource_uid,
-        expression=reporting,
-        evaluator_type="lt",
-        threshold=expected,
-        duration="5m",
-        no_data_state="Alerting",
-        labels=base_labels(config, {"check": "ansible_runner_state_metric", "role": "bastion", "service": "Ansible"}),
-        annotations={
-            "summary": "Ansible runner state metric is missing",
-            "description": "The control bastion's Ansible runner state metric is not reporting.",
-        },
-        contact_point=config["grafana"]["contact_point"],
+
+
+
+
+
+
+
+
+
+
+
+
+def first_matching(
+    items: list[dict[str, Any]],
+    required: dict[str, Any],
+    defaults: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Select the first matching item without assuming any deployed role or service."""
+    defaults = defaults or {}
+    return next(
+        (item for item in items if all(item.get(key, defaults.get(key)) == value for key, value in required.items())),
+        None,
     )
 
 
-def service_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
-    rules = []
-    service_config = config["service_units"]
-    for host in config["hosts"]:
-        units = list(service_config["common"])
-        units.extend(service_config.get(host["role"], []))
-        if host.get("control_node"):
-            units.extend(service_config["control_node"])
-
-        for unit in units:
-            title = f"{host['short_hostname']} {unit['summary'].replace(' is down', '')}"
-            expression = (
-                "max by (host, environment, role, project, client) "
-                f'(node_systemd_unit_state{{{host_selector(host["fqdn"])},'
-                f'name="{promql_string(unit["name"])}",state="active"}})'
-            )
-            rules.append(
-                alert_rule(
-                    identity=host_rule_identity(host, unit["check"]),
-                    uid_registry=config["uid_registry"],
-                    title=title,
-                    folder_uid=folder_uid,
-                    rule_group=config["grafana"]["evaluation_group"],
-                    datasource_uid=datasource_uid,
-                    expression=expression,
-                    evaluator_type="lt",
-                    threshold=1,
-                    labels=host_labels(config, host, unit["check"]),
-                    annotations={
-                        "summary": unit["summary"],
-                        "description": f"{host['fqdn']} {unit['name']} is not active.",
-                    },
-                    contact_point=config["grafana"]["contact_point"],
-                )
-            )
-
-    return rules
-
-
-def host_metric_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
-    rules = []
-    thresholds = config["thresholds"]
-    runner_suppression, _, _ = dependency_state_queries(config, RUNNER_UNIT)
-    for host in config["hosts"]:
-        common = {
-            "uid_registry": config["uid_registry"],
-            "folder_uid": folder_uid,
-            "rule_group": config["grafana"]["evaluation_group"],
-            "datasource_uid": datasource_uid,
-            "contact_point": config["grafana"]["contact_point"],
-        }
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "metrics_data"),
-                title=f"{host['short_hostname']} metrics data",
-                expression=(
-                    "max by (host, environment, role, project, client) "
-                    f'(up{{{host_selector(host["fqdn"])},job="integrations/unix"}})'
-                ),
-                evaluator_type="lt",
-                threshold=1,
-                duration="5m",
-                no_data_state="Alerting",
-                labels=host_labels(config, host, "metrics_data"),
-                annotations={
-                    "summary": "Metrics data is missing",
-                    "description": f"{host['fqdn']} is not sending Grafana Cloud metrics.",
-                },
-                **common,
-            )
-        )
-
-        application_site = next(
-            (site for site in config["sites"]
-             if site.get("kind") == "application"
-             and site.get("role", "web") == host["role"]),
-            None,
-        )
-        if application_site is not None:
-            application_name = application_site.get("display_name", "Time Tracker")
-            health_check = application_site.get("health_check", "timetracker_health")
-            health_pending = application_site.get("health_pending", "5m")
-            health_seconds = duration_seconds(health_pending)
-            health_duration = {60: "one minute", 300: "five minutes"}.get(
-                health_seconds, f"{health_seconds} seconds"
-            )
-            rules.append(
-                alert_rule(
-                    identity=host_rule_identity(host, health_check),
-                    title=f"{host['short_hostname']} {application_name} health check",
-                    expression=(
-                        "max by (host, domain, environment, role, project, client) "
-                        f'(probe_success{{{host_selector(host["fqdn"])},'
-                        f'domain="{promql_string(application_site["domain"])}",'
-                        f'check="{promql_string(health_check)}"}})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration=health_pending,
-                    minimum_duration=health_pending,
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": health_check,
-                            "domain": application_site["domain"],
-                            "host": host["fqdn"],
-                            "project": host["project"],
-                            "role": host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": f"{application_name} health check failed",
-                        "description": (
-                            f"{host['fqdn']} {application_name} local health endpoint "
-                            f"has not returned 200 OK for at least {health_duration}."
-                        ),
-                    },
-                    **common,
-                )
-            )
-
-        cpu_minutes = 5
-        cpu_expression = (
-            "100 * (1 - avg by (host, environment, role, project, client) "
-            f'(rate(node_cpu_seconds_total{{{host_selector(host["fqdn"])},mode="idle"}}[{cpu_minutes}m])))'
-        )
-        if runner_suppression:
-            cpu_expression = f"{cpu_expression} unless on () {runner_suppression}"
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "cpu_utilization"),
-                title=f"{host['short_hostname']} CPU utilization",
-                expression=cpu_expression,
-                evaluator_type="gte",
-                threshold=float(thresholds["cpu_percent"]),
-                duration="5m",
-                labels=host_labels(config, host, "cpu_utilization"),
-                annotations={
-                    "summary": "CPU utilization is high",
-                    "description": (
-                        f"{host['fqdn']} {cpu_minutes}-minute average CPU utilization is >= "
-                        f"{thresholds['cpu_percent']}% for >= 5 minutes."
-                    ),
-                    "check_value": "{{ humanize $values.A.Value }}%",
-                },
-                **common,
-            )
-        )
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "memory_utilization"),
-                title=f"{host['short_hostname']} memory utilization",
-                expression=(
-                    "100 * (1 - max by (host, environment, role, project, client) "
-                    f'(node_memory_MemAvailable_bytes{{{host_selector(host["fqdn"])}}}) '
-                    "/ max by (host, environment, role, project, client) "
-                    f'(node_memory_MemTotal_bytes{{{host_selector(host["fqdn"])}}}))'
-                ),
-                evaluator_type="gte",
-                threshold=float(thresholds["memory_percent"]),
-                duration="2m",
-                labels=host_labels(config, host, "memory_utilization"),
-                annotations={
-                    "summary": "Memory utilization is high",
-                    "description": (
-                        f"{host['fqdn']} memory utilization is >= {thresholds['memory_percent']}% "
-                        "for >= 5 minutes."
-                    ),
-                    "check_value": "{{ humanize $values.A.Value }}%",
-                },
-                **common,
-            )
-        )
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "filesystem_space"),
-                title=f"{host['short_hostname']} filesystem space utilization",
-                expression=(
-                    "100 * (1 - max by (host, environment, role, project, client, mountpoint) "
-                    f'(node_filesystem_avail_bytes{{{host_selector(host["fqdn"])},mountpoint="/",'
-                    'fstype!~"tmpfs|overlay"}) / max by (host, environment, role, project, client, mountpoint) '
-                    f'(node_filesystem_size_bytes{{{host_selector(host["fqdn"])},mountpoint="/",'
-                    'fstype!~"tmpfs|overlay"}))'
-                ),
-                evaluator_type="gte",
-                threshold=float(thresholds["filesystem_percent"]),
-                labels=host_labels(config, host, "filesystem_space"),
-                annotations={
-                    "summary": "Filesystem space utilization is high",
-                    "description": (
-                        f"{host['fqdn']} filesystem / space utilization is >= "
-                        f"{thresholds['filesystem_percent']}%."
-                    ),
-                    "check_value": "{{ humanize $values.A.Value }}%",
-                    "mount_point": "/",
-                },
-                **common,
-            )
-        )
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "filesystem_inode"),
-                title=f"{host['short_hostname']} filesystem inode utilization",
-                expression=(
-                    "100 * (1 - max by (host, environment, role, project, client, mountpoint) "
-                    f'(node_filesystem_files_free{{{host_selector(host["fqdn"])},mountpoint="/",'
-                    'fstype!~"tmpfs|overlay"}) / max by (host, environment, role, project, client, mountpoint) '
-                    f'(node_filesystem_files{{{host_selector(host["fqdn"])},mountpoint="/",'
-                    'fstype!~"tmpfs|overlay"}))'
-                ),
-                evaluator_type="gte",
-                threshold=float(thresholds["filesystem_inode_percent"]),
-                labels=host_labels(config, host, "filesystem_inode"),
-                annotations={
-                    "summary": "Filesystem inode utilization is high",
-                    "description": (
-                        f"{host['fqdn']} filesystem / inode utilization is >= "
-                        f"{thresholds['filesystem_inode_percent']}%."
-                    ),
-                    "check_value": "{{ printf \"%.3f\" $values.A.Value }}%",
-                    "mount_point": "/",
-                },
-                **common,
-            )
-        )
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "swap_utilization"),
-                title=f"{host['short_hostname']} swap utilization",
-                expression=(
-                    "100 * (1 - max by (host, environment, role, project, client) "
-                    f'(node_memory_SwapFree_bytes{{{host_selector(host["fqdn"])}}}) '
-                    "/ max by (host, environment, role, project, client) "
-                    f'(node_memory_SwapTotal_bytes{{{host_selector(host["fqdn"])}}}))'
-                ),
-                evaluator_type="gte",
-                threshold=float(thresholds["swap_percent"]),
-                duration="2m",
-                labels=host_labels(config, host, "swap_utilization"),
-                annotations={
-                    "summary": "Swap utilization is high",
-                    "description": f"{host['fqdn']} swap utilization is >= {thresholds['swap_percent']}%.",
-                    "check_value": "{{ humanize $values.A.Value }}%",
-                },
-                **common,
-            )
-        )
-
-        rules.append(
-            alert_rule(
-                identity=host_rule_identity(host, "restic_stale_backup"),
-                title=f"{host['short_hostname']} restic backup stale",
-                expression=(
-                    "time() - max by (host, environment, role, project, client) "
-                    f'(grayhaven_restic_backup_last_success_timestamp_seconds{{{host_selector(host["fqdn"])}}})'
-                ),
-                evaluator_type="gt",
-                threshold=float(thresholds["restic_stale_seconds"]),
-                labels=host_labels(config, host, "restic_stale_backup"),
-                annotations={
-                    "summary": "Restic backup is stale",
-                    "description": (
-                        f"{host['fqdn']} restic backup has not completed successfully "
-                        "within the expected window."
-                    ),
-                },
-                **common,
-            )
-        )
-
-        if host.get("control_node"):
-            rules.append(
-                alert_rule(
-                    identity=host_rule_identity(host, "ansible_convergence"),
-                    title=f"{host['short_hostname']} Ansible convergence",
-                    expression=(
-                        "max by (host, environment) "
-                        f'(grayhaven_ansible_convergence_last_success{{{host_selector(host["fqdn"])}}})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    labels=host_labels(config, host, "ansible_convergence"),
-                    annotations={
-                        "summary": "Last Ansible convergence failed",
-                        "description": f"{host['fqdn']} last Ansible convergence did not complete successfully.",
-                    },
-                    **common,
-                )
-            )
-
-    return rules
-
-
-def site_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
-    rules = []
-    if not config["sites"]:
-        return rules
-
-    common = {
-        "uid_registry": config["uid_registry"],
-        "folder_uid": folder_uid,
-        "rule_group": config["grafana"]["evaluation_group"],
-        "datasource_uid": datasource_uid,
-        "contact_point": config["grafana"]["contact_point"],
+def render_rule_templates(
+    config: dict[str, Any], folder_uid: str, datasource_uid: str,
+    definitions: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Render operator-supplied definitions with a restricted, credential-free context."""
+    if not isinstance(definitions, dict) or not isinstance(definitions.get("templates"), list):
+        raise GrafanaError("Alert definitions must provide a template list")
+    parameters = definitions.get("parameters", {})
+    if not isinstance(parameters, dict):
+        raise GrafanaError("Alert parameters must be a mapping")
+    context_config = {
+        key: config[key]
+        for key in ("labels", "thresholds", "hosts", "sites", "public_status", "service_units", "tls_mode", "uid_registry", "process_containers")
+        if key in config
     }
-
-    for site in config["sites"]:
-        site_host = next((host for host in config["hosts"] if host["role"] == site.get("role", "web")), None)
-        if site_host is None:
-            continue
-        for target_domain in [site["domain"], *site["aliases"]]:
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(target_domain, "https_200"),
-                    title=f"{target_domain} HTTPS availability",
-                    expression=(
-                        "max by (domain, environment, role, project, client) "
-                        f'(probe_success{{domain="{promql_string(target_domain)}",check="https_200"}})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration="1m",
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "https_200",
-                            "domain": target_domain,
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "HTTPS/TLS availability check failed",
-                        "description": (
-                            f"{target_domain} could not establish an HTTPS/TLS connection."
-                        ),
-                    },
-                    **common,
-                )
-            )
-
-        if site.get("dev_domain"):
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(site["dev_domain"], "dev_basic_auth_401"),
-                    title=f"{site['dev_domain']} basic auth",
-                    expression=(
-                        "max by (domain, environment, role, project, client) "
-                        f'(probe_success{{domain="{promql_string(site["dev_domain"])}",'
-                        'check="dev_basic_auth_401"})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration="1m",
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "dev_basic_auth_401",
-                            "domain": site["dev_domain"],
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "Development basic auth check failed",
-                        "description": (
-                            f"{site['dev_domain']} did not return 401 Unauthorized "
-                            "without credentials."
-                        ),
-                    },
-                    **common,
-                )
-            )
-
-        if site.get("redirect_http", True):
-            redirect_domains = [site["domain"], *site["aliases"]]
-            if site.get("dev_domain"):
-                redirect_domains.append(site["dev_domain"])
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(site["domain"], "http_https_redirect"),
-                    title=f"{site['domain']} HTTP to HTTPS redirects",
-                    expression=(
-                        "min by (domain, environment, role, project, client) "
-                        f'(probe_success{{domain=~"{domain_regex(redirect_domains)}",'
-                        'check="http_https_redirect"})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration="1m",
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "http_https_redirect",
-                            "domain": site["domain"],
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "HTTP to HTTPS redirect check failed",
-                        "description": (
-                            f"{site['domain']} HTTP to HTTPS redirect checks did not all return "
-                            "a valid HTTPS redirect."
-                        ),
-                    },
-                    **common,
-                )
-            )
-
-        if config.get("tls_mode") == "host" or site.get("role") == "mcp":
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(site["domain"], "ssl_certificate_expired"),
-                    title=f"{site['domain']} SSL certificate expired",
-                    expression=(
-                        "max by (domain, environment, role, project, client) "
-                        f'(probe_ssl_earliest_cert_expiry{{domain="{promql_string(site["domain"])}",'
-                        'check="ssl_certificate"} - time())'
-                    ),
-                    evaluator_type="lte",
-                    threshold=0,
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "ssl_certificate_expired",
-                            "domain": site["domain"],
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "SSL certificate is expired",
-                        "description": f"{site['domain']} SSL certificate is expired.",
-                    },
-                    **common,
-                )
-            )
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(site["domain"], "ssl_certificate_expiring"),
-                    title=f"{site['domain']} SSL certificate expiring within 14 days",
-                    expression=(
-                        "max by (domain, environment, role, project, client) "
-                        "("
-                        f'(probe_ssl_earliest_cert_expiry{{domain="{promql_string(site["domain"])}",'
-                        'check="ssl_certificate"} - time() '
-                        f'< {float(config["thresholds"]["certificate_expiring_seconds"])}) '
-                        "and "
-                        f'(probe_ssl_earliest_cert_expiry{{domain="{promql_string(site["domain"])}",'
-                        'check="ssl_certificate"} - time() > 0)'
-                        ")"
-                    ),
-                    evaluator_type="gt",
-                    threshold=0,
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "ssl_certificate_expiring",
-                            "domain": site["domain"],
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "SSL certificate is expiring soon",
-                        "description": f"{site['domain']} SSL certificate expires within 14 days.",
-                        "check_value": "{{ humanizeDuration $values.A.Value }}",
-                    },
-                    **common,
-                )
-            )
-            rules.append(
-                alert_rule(
-                    identity=domain_rule_identity(site["domain"], "ssl_certificate_trusted"),
-                    title=f"{site['domain']} using untrusted SSL certificate",
-                    expression=(
-                        "max by (domain, environment, role, project, client) "
-                        f'(probe_success{{domain="{promql_string(site["domain"])}",'
-                        'check="ssl_certificate_trusted"})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration="1m",
-                    labels=base_labels(
-                        config,
-                        {
-                            "check": "ssl_certificate_trusted",
-                            "domain": site["domain"],
-                            "project": site_host["project"],
-                            "role": site_host["role"],
-                        },
-                    ),
-                    annotations={
-                        "summary": "SSL certificate is not publicly trusted",
-                        "description": (
-                            f"{site['domain']} is presenting an SSL certificate "
-                            "that the external probe does not trust."
-                        ),
-                    },
-                    **common,
-                )
-            )
-
-    return rules
-
-
-def external_service_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
-    common = {
-        "uid_registry": config["uid_registry"],
-        "folder_uid": folder_uid,
-        "rule_group": config["grafana"]["evaluation_group"],
-        "datasource_uid": datasource_uid,
-        "contact_point": config["grafana"]["contact_point"],
+    context_config["grafana"] = {
+        key: config.get("grafana", {})[key]
+        for key in ("folder", "evaluation_group", "evaluation_interval", "contact_point", "prometheus_datasource_name")
+        if key in config.get("grafana", {})
     }
-    selector = (
-        f'client="{promql_string(config["labels"]["client"])}",'
-        f'environment="{promql_string(config["labels"]["environment"])}"'
+    renderer = SandboxedEnvironment(
+        undefined=StrictUndefined, extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"],
+        autoescape=False,
     )
-
-    rules = [
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_service_telemetry_success"
-            ),
-            title="GCS service telemetry failed for >= 5 min",
-            expression=(
-                "max by (client, environment, location, project_id) "
-                f"(grayhaven_gcs_service_telemetry_success{{{selector}}})"
-            ),
-            evaluator_type="lt",
-            threshold=1,
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_service_telemetry_success",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "GCS service telemetry collection failed",
-                "description": "The Google Cloud Storage public service-health collector is not reporting successful telemetry.",
-            },
-            no_data_state="Alerting",
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity("Google Cloud Storage", "gcs_service_status"),
-            title="GCS Degraded for >= 15 min",
-            expression=(
-                "max by (client, environment, location, product, project_id, status) "
-                f"(grayhaven_gcs_service_status{{{selector}}})"
-            ),
-            evaluator_type="lt",
-            threshold=1,
-            duration="15m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_service_status",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "Google Cloud Storage is degraded",
-                "description": "Google Cloud Storage is not reporting Operational status.",
-                "service_status": "{{ $labels.status }}",
-            },
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_stale_bucket_check_stale"
-            ),
-            title="GCS stale bucket check stale",
-            expression=(
-                "time() - max by (client, environment, location, project_id) "
-                f"(grayhaven_gcs_restic_stale_bucket_check_last_success_timestamp_seconds{{{selector}}})"
-            ),
-            evaluator_type="gt",
-            threshold=float(config["thresholds"]["gcs_stale_bucket_check_stale_seconds"]),
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_stale_bucket_check_stale",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "Stale GCS bucket check has not completed",
-                "description": "The daily stale GCS restic bucket check has not completed recently.",
-            },
-            no_data_state="Alerting",
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_stale_bucket_count"
-            ),
-            title="Stale GCS restic buckets",
-            expression=(
-                "max by (client, environment, location, project_id) "
-                f"(grayhaven_gcs_restic_stale_bucket_count{{{selector}}})"
-            ),
-            evaluator_type="gt",
-            threshold=0,
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_stale_bucket_count",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "Stale GCS restic buckets found",
-                "description": "The daily stale GCS restic bucket check found one or more stale buckets.",
-                "check_value": COMMA_INTEGER_TEMPLATE,
-            },
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_operation_telemetry_stale"
-            ),
-            title="GCS operation telemetry stale",
-            expression=(
-                "time() - max by (client, environment, location, project_id) "
-                f"(grayhaven_gcs_restic_telemetry_last_success_timestamp_seconds{{{selector}}})"
-            ),
-            evaluator_type="gt",
-            threshold=float(config["thresholds"]["gcs_operation_stale_seconds"]),
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_operation_telemetry_stale",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "GCS operation telemetry is stale",
-                "description": "Month-to-date GCS operation telemetry has not refreshed recently.",
-            },
-            no_data_state="Alerting",
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_class_a_monthly_operations"
-            ),
-            title="GCS Class A operations >= 80% usage",
-            expression=(
-                "max by (client, environment, location, month, operation_class, project_id) "
-                f'(grayhaven_gcs_restic_billing_month_operations_total{{{selector},operation_class="Class A"}})'
-            ),
-            evaluator_type="gt",
-            threshold=integer_at_least_threshold(
-                config["thresholds"]["gcs_class_a_monthly_warning_operations"]
-            ),
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_class_a_monthly_operations",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "GCS Class A operations are approaching monthly usage limit",
-                "description": "GCS Class A operations are at or above the configured warning threshold.",
-                "check_value": COMMA_INTEGER_TEMPLATE,
-                "month": "{{ $labels.month }}",
-            },
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Storage", "gcs_class_b_monthly_operations"
-            ),
-            title="GCS Class B operations >= 80% usage",
-            expression=(
-                "max by (client, environment, location, month, operation_class, project_id) "
-                f'(grayhaven_gcs_restic_billing_month_operations_total{{{selector},operation_class="Class B"}})'
-            ),
-            evaluator_type="gt",
-            threshold=integer_at_least_threshold(
-                config["thresholds"]["gcs_class_b_monthly_warning_operations"]
-            ),
-            labels=base_labels(
-                config,
-                {
-                    "check": "gcs_class_b_monthly_operations",
-                    "service": "Google Cloud Storage",
-                },
-            ),
-            annotations={
-                "summary": "GCS Class B operations are approaching monthly usage limit",
-                "description": "GCS Class B operations are at or above the configured warning threshold.",
-                "check_value": COMMA_INTEGER_TEMPLATE,
-                "month": "{{ $labels.month }}",
-            },
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Monitoring", "google_monitoring_service_telemetry_success"
-            ),
-            title="Google Monitoring service telemetry failed for >= 5 min",
-            expression=(
-                "max by (client, environment, location, project_id) "
-                f"(grayhaven_google_monitoring_service_telemetry_success{{{selector}}})"
-            ),
-            evaluator_type="lt",
-            threshold=1,
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "google_monitoring_service_telemetry_success",
-                    "service": "Google Cloud Monitoring",
-                },
-            ),
-            annotations={
-                "summary": "Google Monitoring service telemetry collection failed",
-                "description": (
-                    "The Cloud Monitoring public service-health collector is not reporting "
-                    "successful telemetry."
-                ),
-            },
-            no_data_state="Alerting",
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Monitoring", "google_monitoring_service_status"
-            ),
-            title="Google Monitoring Degraded for >= 15 min",
-            expression=(
-                "max by (client, environment, location, product, project_id, status) "
-                f"(grayhaven_google_monitoring_service_status{{{selector}}})"
-            ),
-            evaluator_type="lt",
-            threshold=1,
-            duration="15m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "google_monitoring_service_status",
-                    "service": "Google Cloud Monitoring",
-                },
-            ),
-            annotations={
-                "summary": "Google Monitoring is degraded",
-                "description": "Cloud Monitoring is not reporting Operational status.",
-                "service_status": "{{ $labels.status }}",
-            },
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Monitoring", "google_monitoring_telemetry_stale"
-            ),
-            title="Google Monitoring telemetry stale",
-            expression=(
-                "time() - max by (client, environment, location, project_id) "
-                f"(grayhaven_google_monitoring_telemetry_last_success_timestamp_seconds"
-                f"{{{selector}}})"
-            ),
-            evaluator_type="gt",
-            threshold=float(
-                config["thresholds"]["google_monitoring_usage_stale_seconds"]
-            ),
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "google_monitoring_telemetry_stale",
-                    "service": "Google Cloud Monitoring",
-                },
-            ),
-            annotations={
-                "summary": "Google Monitoring telemetry is stale",
-                "description": (
-                    "Month-to-date Cloud Monitoring billed-series telemetry has not "
-                    "refreshed recently."
-                ),
-            },
-            no_data_state="Alerting",
-            **common,
-        ),
-        alert_rule(
-            identity=service_rule_identity(
-                "Google Cloud Monitoring", "google_monitoring_monthly_billed_series"
-            ),
-            title="Google Monitoring series >= 80% usage",
-            expression=(
-                "max by (client, environment, location, month, project_id) "
-                f"(grayhaven_google_monitoring_billing_month_series_total{{{selector}}})"
-            ),
-            evaluator_type="gt",
-            threshold=integer_at_least_threshold(
-                config["thresholds"]["google_monitoring_monthly_warning_series"]
-            ),
-            labels=base_labels(
-                config,
-                {
-                    "check": "google_monitoring_monthly_billed_series",
-                    "service": "Google Cloud Monitoring",
-                },
-            ),
-            annotations={
-                "summary": "Google Monitoring series reached the monthly warning threshold",
-                "description": (
-                    "Cloud Monitoring billed query series are at or above the configured "
-                    "warning threshold."
-                ),
-                "check_value": COMMA_INTEGER_TEMPLATE,
-                "month": "{{ $labels.month }}",
-            },
-            **common,
-        ),
-    ]
-
-    rules.append(
-        alert_rule(
-            identity=service_rule_identity("Proton", "proton_telemetry_success"),
-            title="Proton status telemetry failed for >= 5 min",
-            expression=(
-                "max by (client, environment, provider) "
-                f"(grayhaven_proton_telemetry_success{{{selector}}})"
-            ),
-            evaluator_type="lt",
-            threshold=1,
-            duration="5m",
-            labels=base_labels(
-                config,
-                {
-                    "check": "proton_telemetry_success",
-                    "service": "Proton",
-                },
-            ),
-            annotations={
-                "summary": "Proton status telemetry collection failed",
-                "description": "The Proton public service-health collector is not reporting successful telemetry.",
-            },
-            no_data_state="Alerting",
-            **common,
-        )
+    renderer.globals.clear()
+    renderer.globals.update(
+        alert_rule=alert_rule, base_labels=base_labels,
+        dependency_state_queries=lambda data, unit: dependency_state_queries(
+            data, unit, freshness_window=parameters["dependency_freshness"],
+            settle_window=parameters["dependency_settle"],
+        ), domain_regex=domain_regex,
+        domain_rule_identity=domain_rule_identity, duration_seconds=duration_seconds,
+        host_labels=host_labels, host_rule_identity=host_rule_identity,
+        host_selector=host_selector, integer_at_least_threshold=integer_at_least_threshold,
+        promql_string=promql_string, service_rule_identity=service_rule_identity,
+        first_matching=first_matching, float=float, list=list, repr=repr,
+        format_value=format,
     )
-
-    for service_name, component_name in PROTON_SERVICES:
-        rules.append(
-            alert_rule(
-                identity=service_rule_identity(
-                    f"Proton {service_name}", "proton_service_status"
-                ),
-                title=f"Proton {service_name} Degraded for >= 15 min",
-                expression=(
-                    "max by (client, environment, provider, service, component, status) "
-                    f"(grayhaven_proton_service_status{{{selector},"
-                    f'service="{promql_string(service_name)}",'
-                    f'component="{promql_string(component_name)}"}})'
-                ),
-                evaluator_type="lt",
-                threshold=1,
-                duration="15m",
-                labels=base_labels(
-                    config,
-                    {
-                        "check": "proton_service_status",
-                        "service": f"Proton {service_name}",
-                    },
-                ),
-                annotations={
-                    "summary": f"Proton {service_name} is degraded",
-                    "description": f"{component_name} is not reporting Operational status.",
-                    "service_status": "{{ $labels.status }}",
-                },
-                **common,
+    output = []
+    for definition in definitions["templates"]:
+        if not isinstance(definition, dict) or not isinstance(definition.get("template"), str):
+            raise GrafanaError("Each alert definition must provide a template")
+        try:
+            rendered = renderer.from_string(definition["template"]).render(
+                config=copy.deepcopy(context_config), parameters=copy.deepcopy(parameters),
+                folder_uid=folder_uid, datasource_uid=datasource_uid,
             )
-        )
+            rules = json.loads(rendered)
+        except (TemplateError, ValueError, TypeError, KeyError, GrafanaError):
+            raise GrafanaError("Alert definition rendering failed") from None
+        if isinstance(rules, dict):
+            rules = [rules]
+        if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
+            raise GrafanaError("Alert templates must produce rule objects")
+        for rule in rules:
+            if (
+                any(not isinstance(rule.get(key), str) or not rule[key] for key in ("_identity", "uid", "title"))
+                or not valid_rule_uid(rule["uid"])
+                or not isinstance(rule.get("data"), list)
+                or not isinstance(rule.get("labels"), dict)
+                or not isinstance(rule.get("annotations"), dict)
+            ):
+                raise GrafanaError("Alert template produced an invalid rule")
+        output.extend(rules)
+    return output
 
-    return rules
 
-
-def public_status_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> list[dict[str, Any]]:
-    common = {
-        "uid_registry": config["uid_registry"],
-        "folder_uid": folder_uid,
-        "rule_group": config["grafana"]["evaluation_group"],
-        "datasource_uid": datasource_uid,
-        "contact_point": config["grafana"]["contact_point"],
-    }
-    selector = (
-        f'client="{promql_string(config["labels"]["client"])}",'
-        f'environment="{promql_string(config["labels"]["environment"])}"'
-    )
-    rules = []
-    for provider, definition in config.get("public_status", {}).items():
-        name = definition["name"]
-        check = f"{provider}_telemetry_success"
-        rules.append(
-            alert_rule(
-                identity=service_rule_identity(name, check),
-                title=f"{name} status telemetry failed for >= 5 min",
-                expression=(
-                    "max by (client, environment, provider) "
-                    f"(grayhaven_{check}{{{selector}}})"
-                ),
-                evaluator_type="lt",
-                threshold=1,
-                duration="5m",
-                labels=base_labels(config, {"check": check, "service": name}),
-                annotations={
-                    "summary": f"{name} status telemetry collection failed",
-                    "description": f"The {name} public service-health collector is not reporting successful telemetry.",
-                },
-                no_data_state="Alerting",
-                **common,
-            )
-        )
-        for component in definition["components"]:
-            check = f"{provider}_service_status"
-            service = f"{name} {component['name']}"
-            rules.append(
-                alert_rule(
-                    identity=service_rule_identity(service, check),
-                    title=f"{service} Degraded for >= 15 min",
-                    expression=(
-                        "max by (client, environment, provider, service, component, status) "
-                        f'(grayhaven_{check}{{{selector},component="{promql_string(component["id"])}"}})'
-                    ),
-                    evaluator_type="lt",
-                    threshold=1,
-                    duration="15m",
-                    labels=base_labels(config, {"check": check, "service": service}),
-                    annotations={
-                        "summary": f"{service} is degraded",
-                        "description": f"{service} is not reporting Operational status.",
-                        "service_status": "{{ $labels.status }}",
-                    },
-                    **common,
-                )
-            )
-    return rules
+def decode_rule_definitions(encoded: str) -> dict[str, Any]:
+    """Decode definitions without allowing configuration text into diagnostics."""
+    try:
+        data = yaml.safe_load(base64.b64decode(encoded, validate=True))
+    except (ValueError, TypeError, yaml.YAMLError):
+        raise GrafanaError("Alert definitions could not be decoded") from None
+    if not isinstance(data, dict):
+        raise GrafanaError("Alert definitions must be a mapping")
+    return data
 
 
 def desired_rules(config: dict[str, Any], folder_uid: str, datasource_uid: str) -> dict[str, dict[str, Any]]:
-    rules = []
-    rules.extend(host_metric_rules(config, folder_uid, datasource_uid))
-    rules.append(runner_state_metric_rule(config, folder_uid, datasource_uid))
-    rules.extend(service_rules(config, folder_uid, datasource_uid))
-    rules.extend(site_rules(config, folder_uid, datasource_uid))
-    rules.extend(external_service_rules(config, folder_uid, datasource_uid))
-    rules.extend(public_status_rules(config, folder_uid, datasource_uid))
+    rules = render_rule_templates(config, folder_uid, datasource_uid, config["rule_definitions"])
     identities = [rule.pop("_identity") for rule in rules]
     if len(set(identities)) != len(identities):
         raise GrafanaError("generated Grafana alert identities are not unique")
@@ -1494,6 +604,7 @@ def main() -> int:
         return 0
 
     config["uid_registry"] = load_uid_registry(config["uid_registry_file"])
+    config["rule_definitions"] = decode_rule_definitions(config["rule_definitions_base64"])
     created, updated, deleted = sync(config)
     changed = created + updated + deleted > 0
     print(f"changed={str(changed).lower()} created={created} updated={updated} deleted={deleted}")

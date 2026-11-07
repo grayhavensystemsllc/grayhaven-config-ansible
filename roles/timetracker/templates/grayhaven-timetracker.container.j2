@@ -30,7 +30,7 @@ Environment=TRUSTED_PROXY_COUNT=1
 Environment=TZ={{ baseline_validation_timezone }}
 DropCapability=all
 NoNewPrivileges=true
-PidsLimit=128
+PidsLimit={{ timetracker_pids_limit }}
 ReadOnly=true
 Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m
 HealthCmd=python -c "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/health', headers={'Host': '{{ timetracker.hostname }}'}); urllib.request.urlopen(request, timeout=3)"

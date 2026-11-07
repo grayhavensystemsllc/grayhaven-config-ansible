@@ -116,6 +116,7 @@
   register: deploy_websites_certbot_issuance
   notify: Reload nginx
   when: deploy_websites_tls_mode == "host"
+  no_log: true
 
 - name: Record Certbot certificate environment markers
   ansible.builtin.copy:

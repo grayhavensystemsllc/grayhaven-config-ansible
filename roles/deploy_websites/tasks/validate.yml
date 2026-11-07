@@ -93,6 +93,7 @@
   vars:
     deploy_websites_domain_deployment: "{{ item.deployment | default({}) }}"
     deploy_websites_domain_repository: "{{ deploy_websites_domain_deployment.repository | default({}) }}"
+  no_log: true
 
 - name: Validate hosted domain development authentication entries
   ansible.builtin.assert:
@@ -113,6 +114,7 @@
 - name: Initialize site definitions
   ansible.builtin.set_fact:
     deploy_websites_sites: []
+  no_log: true
 
 - name: Initialize website certificate definitions
   ansible.builtin.set_fact:

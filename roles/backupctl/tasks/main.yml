@@ -95,6 +95,7 @@
   changed_when: false
   failed_when: false
   when: backupctl_existing_checkout.stat.exists
+  no_log: true
 
 - name: Remove grayhaven-backupctl checkout when origin URL changes
   ansible.builtin.file:
@@ -119,6 +120,7 @@
     HOME: /home/ansible
     USER: ansible
     LOGNAME: ansible
+  no_log: true
 
 - name: Read checked-out grayhaven-backupctl commit
   ansible.builtin.command:
@@ -136,6 +138,7 @@
     LOGNAME: ansible
   register: backupctl_checkout_head
   changed_when: false
+  no_log: true
 
 - name: Verify checked-out grayhaven-backupctl commit
   ansible.builtin.assert:
