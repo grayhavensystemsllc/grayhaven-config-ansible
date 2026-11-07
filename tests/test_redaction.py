@@ -112,12 +112,13 @@ class RedactionTests(unittest.TestCase):
             message: str
             details: tuple
             password: str
+            environment: dict
 
         @dataclass(frozen=True)
         class Summary:
             event: Event
 
-        supplied = Summary(Event(self.value, (self.value,), self.value))
+        supplied = Summary(Event(self.value, (self.value,), self.value, {"SAMPLE_OPTION": self.value}))
         result = redaction.Redactor([self.value]).tree(supplied)
         self.assertIsInstance(result, Summary)
         self.assertIsInstance(result.event, Event)

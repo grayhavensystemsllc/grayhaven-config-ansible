@@ -100,7 +100,8 @@ class Redactor:
                 **{
                     field.name: (
                         REDACTED
-                        if SENSITIVE.search(field.name)
+                        if (SENSITIVE.search(field.name) or
+                            (ENVIRONMENT.search(field.name) and isinstance(getattr(value, field.name), dict)))
                         else self.tree(getattr(value, field.name))
                     )
                     for field in dataclasses.fields(value)
