@@ -34,7 +34,9 @@ class ShellProgramTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         shell_coverage.write_report()
 
-    def run_bash(self, source: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def run_bash(
+        self, source: str, *, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
             trace = pathlib.Path(temp_dir) / "trace.bash"
             trace.write_text(shell_coverage.TRACE_SCRIPT, encoding="utf-8")
@@ -70,7 +72,10 @@ class ShellProgramTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 shell_coverage.write_report()
                 report = ET.parse(shell_coverage.XML_PATH)
-                hits = {int(line.get("number")): int(line.get("hits")) for line in report.iter("line")}
+                hits = {
+                    int(line.get("number")): int(line.get("hits"))
+                    for line in report.iter("line")
+                }
             self.assertEqual(hits[2], 1)
             self.assertEqual(hits[4], 0)
             self.assertEqual(hits[6], 1)
@@ -106,20 +111,27 @@ class ShellProgramTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
-                    "@" + folder + "/mock-dependency.yml" in result.stdout, include_optional
+                    "@" + folder + "/mock-dependency.yml" in result.stdout,
+                    include_optional,
                 )
 
     def test_runner_arguments_and_dispatch(self) -> None:
         for arguments, expected in (
             ("--converge", "converge|false|"),
-            ("--cleanup-gcs-restic-buckets --execute", "cleanup-gcs-restic-buckets|true|"),
-            ("--rotate-vault-password --extra-vars-file /tmp/vars", "rotate-vault-password|false|/tmp/vars"),
+            (
+                "--cleanup-gcs-restic-buckets --execute",
+                "cleanup-gcs-restic-buckets|true|",
+            ),
+            (
+                "--rotate-vault-password --extra-vars-file /tmp/vars",
+                "rotate-vault-password|false|/tmp/vars",
+            ),
             ("--rotate-vault-deploy-key", "rotate-vault-deploy-key|false|"),
             ("--rotate-ansible-control-key", "rotate-ansible-control-key|false|"),
         ):
             result = self.run_bash(
                 f"export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1; source files/grayhaven-ansible-runner; "
-                f"parse_args {arguments}; printf '%s|%s|%s\\n' \"$RUNNER_COMMAND\" \"$GCS_CLEANUP_EXECUTE\" \"${{RUNNER_EXTRA_VARS_FILES[*]}}\""
+                f'parse_args {arguments}; printf \'%s|%s|%s\\n\' "$RUNNER_COMMAND" "$GCS_CLEANUP_EXECUTE" "${{RUNNER_EXTRA_VARS_FILES[*]}}"'
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), expected)
@@ -133,6 +145,7 @@ class ShellProgramTests(unittest.TestCase):
                 f"export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1; source files/grayhaven-ansible-runner; parse_args {arguments}"
             )
             self.assertNotEqual(result.returncode, 0)
+
             self.assertIn(message, result.stdout + result.stderr)
         result = self.run_bash(
             """
@@ -150,6 +163,51 @@ class ShellProgramTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("rotate-control", result.stdout)
+
+    def test_new_inventory_host_keys_are_scanned_without_replacing_existing_trust(self):
+        for trusted, scan_ok in ((True, True), (False, True), (False, False)):
+            with (
+                self.subTest(trusted=trusted, scan_ok=scan_ok),
+                tempfile.TemporaryDirectory() as folder,
+            ):
+                root = pathlib.Path(folder)
+                result = self.run_bash(
+                    r"""
+                    export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
+                    source files/grayhaven-ansible-runner
+                    INVENTORY_KNOWN_HOSTS="$FIXTURE_ROOT/bridge"
+                    INVENTORY_GLOBAL_KNOWN_HOSTS="$FIXTURE_ROOT/trusted"
+                    CHECKOUT_DIR="$FIXTURE_ROOT/config"
+                    export TMPDIR="$FIXTURE_ROOT"
+                    log() { :; }
+                    running_as_ansible() { return 0; }
+                    run_as_ansible() {
+                      printf '%s' '{"_meta":{"hostvars":{"local.example.test":{"ansible_connection":"local","ansible_host":"127.0.0.1"},"new.example.test":{"ansible_host":"192.0.2.7"}}}}'
+                    }
+                    ssh-keygen() { [[ "$FIXTURE_TRUSTED" == true ]]; }
+                    ssh-keyscan() {
+                      printf '%s\n' "$*" > "$FIXTURE_ROOT/scanned"
+                      [[ "$FIXTURE_SCAN_OK" == true ]] || return 1
+                      printf '%s\n' '192.0.2.7 ssh-ed25519 AAAAfixture'
+                    }
+                    prepare_inventory_known_hosts
+                    """,
+                    env={
+                        "FIXTURE_ROOT": folder,
+                        "FIXTURE_TRUSTED": str(trusted).lower(),
+                        "FIXTURE_SCAN_OK": str(scan_ok).lower(),
+                    },
+                )
+                self.assertEqual(result.returncode == 0, trusted or scan_ok)
+                self.assertEqual((root / "scanned").exists(), not trusted)
+                if result.returncode == 0:
+                    rows = (root / "bridge").read_text().splitlines()
+                    self.assertEqual(len(rows), 0 if trusted else 2)
+                    if rows:
+                        self.assertEqual(
+                            {row.split()[0] for row in rows},
+                            {"192.0.2.7", "new.example.test"},
+                        )
 
     def test_runner_failure_is_reported_once_by_its_own_invocation(self) -> None:
         for fault, status in (("direct", 17), ("subshell", 1), ("pipeline", 1)):
@@ -181,7 +239,10 @@ class ShellProgramTests(unittest.TestCase):
                         env={"FIXTURE_ROOT": folder, "FAULT": fault},
                     )
                     self.assertEqual(result.returncode, status, result.stderr)
-                    self.assertEqual(notices.read_text().splitlines(), [str(status)] * (invocation + 1))
+                    self.assertEqual(
+                        notices.read_text().splitlines(),
+                        [str(status)] * (invocation + 1),
+                    )
 
     def test_runner_retries_failure_notification_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -202,7 +263,9 @@ class ShellProgramTests(unittest.TestCase):
             for option in ("--retry", "--retry-max-time"):
                 self.assertGreater(int(arguments[arguments.index(option) + 1]), 0)
 
-    def test_success_and_other_runner_commands_do_not_send_failure_notices(self) -> None:
+    def test_success_and_other_runner_commands_do_not_send_failure_notices(
+        self,
+    ) -> None:
         for command, status in (("converge", 0), ("fixture-action", 19)):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as folder:
                 result = self.run_bash(
@@ -219,8 +282,11 @@ class ShellProgramTests(unittest.TestCase):
                     run_once() { return "$FIXTURE_STATUS"; }
                     main
                     """,
-                    env={"FIXTURE_ROOT": folder, "FIXTURE_COMMAND": command,
-                         "FIXTURE_STATUS": str(status)},
+                    env={
+                        "FIXTURE_ROOT": folder,
+                        "FIXTURE_COMMAND": command,
+                        "FIXTURE_STATUS": str(status),
+                    },
                 )
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertFalse((pathlib.Path(folder) / "notified").exists())
@@ -249,8 +315,8 @@ class ShellProgramTests(unittest.TestCase):
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
                     source files/grayhaven-ansible-poller
                     STATE_DIR={str(root)!r}; RUNNER_ENV={str(environment)!r}
-                    ANSIBLE_CONTROL_PRIVATE_KEY={str(root / 'control')!r}
-                    VAULT_DEPLOY_PRIVATE_KEY={str(root / 'credential')!r}
+                    ANSIBLE_CONTROL_PRIVATE_KEY={str(root / "control")!r}
+                    VAULT_DEPLOY_PRIVATE_KEY={str(root / "credential")!r}
                     drop_to_ansible() {{ :; }}; prepare_github_known_hosts() {{ :; }}
                     remote_ref() {{ cat "$FIXTURE_ROOT/$1-upstream"; }}
                     checkout_head() {{ if [[ -f "$1" ]]; then cat "$1"; fi; }}
@@ -329,7 +395,10 @@ class ShellProgramTests(unittest.TestCase):
                 elif [[ "$1" == kill-session ]]; then rm -f "$TMUX_STATE"; fi
                 """,
             )
-            executable(fake_bin / "hostname", "#!/usr/bin/env bash\nprintf 'host.example.invalid\n'\n")
+            executable(
+                fake_bin / "hostname",
+                "#!/usr/bin/env bash\nprintf 'host.example.invalid\n'\n",
+            )
             env = {
                 "HOME": str(home),
                 "PATH": f"{fake_bin}:{os.defpath}",
@@ -346,7 +415,9 @@ class ShellProgramTests(unittest.TestCase):
 
             result = self.run_bash(f"env -u TMUX bash {script}", env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("new-session", (root / "tmux.log").read_text(encoding="utf-8"))
+            self.assertIn(
+                "new-session", (root / "tmux.log").read_text(encoding="utf-8")
+            )
 
             (root / "state").touch()
             log_start = (root / "tmux.log").read_text(encoding="utf-8").splitlines()
@@ -354,9 +425,15 @@ class ShellProgramTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             log_end = (root / "tmux.log").read_text(encoding="utf-8").splitlines()
             reset_log = log_end[len(log_start) :]
-            self.assertEqual(reset_log[0], "has-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"])
-            self.assertEqual(reset_log[1], "kill-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"])
-            self.assertTrue(any(entry.startswith("new-session ") for entry in reset_log))
+            self.assertEqual(
+                reset_log[0], "has-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"]
+            )
+            self.assertEqual(
+                reset_log[1], "kill-session -t " + env["GRAYHAVEN_TMUX_SESSION_NAME"]
+            )
+            self.assertTrue(
+                any(entry.startswith("new-session ") for entry in reset_log)
+            )
             self.assertTrue((root / "state").exists())
 
             (root / "state").unlink()
@@ -373,7 +450,9 @@ class ShellProgramTests(unittest.TestCase):
 
             workspace.unlink()
             (root / "state").unlink()
-            executable(fake_bin / "tmux", '#!/usr/bin/env bash\n[[ "$1" != has-session ]]\n')
+            executable(
+                fake_bin / "tmux", '#!/usr/bin/env bash\n[[ "$1" != has-session ]]\n'
+            )
             result = self.run_bash(f"env -u TMUX bash {script}", env=env)
             self.assertEqual(result.returncode, 1)
 
@@ -395,10 +474,13 @@ class ShellProgramTests(unittest.TestCase):
                 f"""
                 #!/usr/bin/env bash
                 if [[ "$1 $2" == "collection download" ]]; then cp {str(artifact)!r} "${{@: -1}}/example.tar.gz";
-                else printf '%s\n' "$3" >> {str(root / 'installed')!r}; fi
+                else printf '%s\n' "$3" >> {str(root / "installed")!r}; fi
                 """,
             )
-            env = {"ANSIBLE_GALAXY_BIN": str(fake), "ANSIBLE_COLLECTIONS_PATH": str(root / "collections")}
+            env = {
+                "ANSIBLE_GALAXY_BIN": str(fake),
+                "ANSIBLE_COLLECTIONS_PATH": str(root / "collections"),
+            }
             result = self.run_bash(f"{script} {requirements} {checksums}", env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "installed").exists())
