@@ -76,6 +76,32 @@ class AlertRuleTests(unittest.TestCase):
         self.assertEqual(rule["for"], values["duration"])
         self.assertEqual(rule["noDataState"], values["no_data_state"])
 
+        for expression in ("sample_response_code", 'sample_detail{target="example"}'):
+            with self.subTest(expression=expression):
+                detailed = alert_sync.alert_rule(
+                    **values, annotation_expression=expression
+                )
+                diagnostic = next(
+                    query for query in detailed["data"] if query["refId"] == "B"
+                )
+                self.assertEqual(diagnostic["model"]["expr"], expression)
+                self.assertEqual(diagnostic["datasourceUid"], values["datasource_uid"])
+                self.assertEqual(diagnostic["model"]["refId"], diagnostic["refId"])
+                self.assertTrue(diagnostic["model"]["instant"])
+                self.assertFalse(diagnostic["model"]["range"])
+                self.assertEqual(
+                    [query for query in detailed["data"] if query is not diagnostic],
+                    rule["data"],
+                )
+                self.assertEqual(
+                    {key: value for key, value in detailed.items() if key != "data"},
+                    {key: value for key, value in rule.items() if key != "data"},
+                )
+
+        for expression in ("", " ", 3, True, [], {}):
+            with self.subTest(), self.assertRaises(alert_sync.GrafanaError):
+                alert_sync.alert_rule(**values, annotation_expression=expression)
+
     def test_pending_period_floor_preserves_longer_periods(self) -> None:
         arguments = {
             "identity": "test:example",
