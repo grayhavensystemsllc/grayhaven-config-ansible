@@ -258,8 +258,13 @@ Cloud API rate-limit responses before retrying.
 
 Alert definitions and stable UID overrides are supplied by the production Vault
 branch. The sync helper renders them using generic helpers and a context without
-API credentials. Host process measurements count kernel tasks and zombies without
-reading process arguments or environments. Container task measurements use each
+API credentials. An alert definition can provide an optional
+`annotation_expression` to expose a diagnostic instant query as reference `B`.
+The alert condition continues to use the primary query `A`; annotations can
+read the diagnostic result through `$values.B`.
+
+Host process measurements count kernel tasks and zombies without reading
+process arguments or environments. Container task measurements use each
 configured container's cgroup PID count and limit.
 
 [Back to top](#observability-architecture)

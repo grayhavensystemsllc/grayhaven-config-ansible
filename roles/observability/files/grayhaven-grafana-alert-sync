@@ -292,7 +292,15 @@ def alert_rule(
     duration: str = "5m",
     no_data_state: str = "OK",
     minimum_duration: str = "5m",
+    annotation_expression: str | None = None,
 ) -> dict[str, Any]:
+    data = [query_data("A", datasource_uid, expression)]
+    if annotation_expression is not None:
+        if not isinstance(annotation_expression, str) or not annotation_expression.strip():
+            raise GrafanaError("annotation expression must be a non-empty string")
+        data.append(query_data("B", datasource_uid, annotation_expression))
+    data.append(threshold_data(evaluator_type, threshold))
+
     return {
         "_identity": identity,
         "uid": rule_uid(identity, uid_registry),
@@ -300,10 +308,7 @@ def alert_rule(
         "folderUID": folder_uid,
         "ruleGroup": rule_group,
         "condition": "C",
-        "data": [
-            query_data("A", datasource_uid, expression),
-            threshold_data(evaluator_type, threshold),
-        ],
+        "data": data,
         "noDataState": no_data_state,
         "execErrState": "Error",
         "for": duration if duration_seconds(duration) >= duration_seconds(minimum_duration) else minimum_duration,
