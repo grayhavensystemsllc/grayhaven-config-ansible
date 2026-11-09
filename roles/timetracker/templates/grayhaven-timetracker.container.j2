@@ -31,6 +31,7 @@ Environment=TZ={{ timezone }}
 DropCapability=all
 NoNewPrivileges=true
 PidsLimit={{ timetracker_pids_limit }}
+RunInit=true
 ReadOnly=true
 Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m
 HealthCmd=python -c "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/health', headers={'Host': '{{ timetracker.hostname }}'}); urllib.request.urlopen(request, timeout=3)"
