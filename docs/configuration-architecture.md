@@ -350,7 +350,8 @@ account. The container uses an immutable `@sha256:` image reference, a
 read-only root filesystem, loopback-only port publication, dropped
 capabilities, no-new-privileges enforcement, a PID limit, and explicit health
 checks. Persistent data, verified backups, branding, and secret files use
-separate SELinux-labeled bind mounts.
+separate SELinux-labeled bind mounts. A minimal container init process forwards
+signals and reaps exited children.
 
 Nginx is the only public application entry point. It terminates host TLS or
 accepts traffic from the managed load balancer, forwards a controlled HTTPS
