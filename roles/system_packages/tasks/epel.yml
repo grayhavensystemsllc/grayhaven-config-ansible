@@ -1,0 +1,52 @@
+---
+- name: Install EPEL repository definitions when missing
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+
+# Major-version redirects and Stream variables can select a newer OS branch.
+- name: Select EPEL metadata for the stable operating system minor release
+  ansible.builtin.replace:
+    path: "/etc/yum.repos.d/{{ item.file }}"
+    regexp: >-
+      (?msx)(^\[{{ item.section | regex_escape }}\][ \t]*\n
+      (?:(?!^\[).)*?^metalink[ \t]*=[ \t]*)[^\n]*
+    replace: >-
+      \g<1>https://mirrors.fedoraproject.org/metalink?repo={{ item.repository }}-{{
+      ansible_facts.distribution_version }}&arch={{ item.architecture }}
+    mode: "0644"
+  loop:
+    - file: epel.repo
+      section: epel
+      repository: epel
+      architecture: "$basearch"
+    - file: epel.repo
+      section: epel-debuginfo
+      repository: epel-debug
+      architecture: "$basearch"
+    - file: epel.repo
+      section: epel-source
+      repository: epel-source
+      architecture: source
+    - file: epel-testing.repo
+      section: epel-testing
+      repository: epel-testing
+      architecture: "$basearch"
+    - file: epel-testing.repo
+      section: epel-testing-debuginfo
+      repository: epel-testing-debug
+      architecture: "$basearch"
+    - file: epel-testing.repo
+      section: epel-testing-source
+      repository: epel-testing-source
+      architecture: source
+  when:
+    - ansible_facts.distribution == "AlmaLinux"
+    - ansible_facts.distribution_major_version == "10"
+
+- name: Update EPEL repository definitions before dependent packages
+  ansible.builtin.dnf:
+    name: epel-release
+    state: latest
+    update_only: true
+    update_cache: true

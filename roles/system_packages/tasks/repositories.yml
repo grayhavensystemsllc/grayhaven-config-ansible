@@ -1,6 +1,42 @@
 ---
-- name: Install EPEL release package before dependent packages
+- name: Configure DigitalOcean package repository
+  ansible.builtin.include_role:
+    name: digitalocean_agent
+    tasks_from: repositories
+
+- name: Configure Grafana package repository
+  ansible.builtin.include_role:
+    name: observability
+    tasks_from: repositories
+  when:
+    - grayhaven_environment == "prod"
+    - observability is defined
+    - observability.grafana_cloud.enabled | bool
+    - "'alerts-in-grafana-cloud' in do_tags | default([])"
+
+# Package facts do not expose the RPM capability's provider.
+- name: Identify operating system release packages  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: rpm -q --whatprovides --queryformat '%{NAME}\n' system-release
+  register: system_packages_release_packages
+  changed_when: false
+  check_mode: false
+
+# Release packages refresh the base repository definitions before EPEL is used.
+- name: Update operating system repository definitions
   ansible.builtin.dnf:
-    name: epel-release
-    state: present
+    name: "{{ system_packages_release_packages.stdout_lines | unique | list }}"
+    state: latest
+    update_only: true
+    disablerepo: "epel*"
+    update_cache: true
+
+- name: Refresh operating system release facts
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - distribution
+
+- name: Prepare EPEL repository definitions
+  ansible.builtin.include_tasks: epel.yml
   when: "'epel-release' in system_packages.baseline"

@@ -1,0 +1,14 @@
+---
+- name: Import DigitalOcean metrics agent repository GPG key
+  ansible.builtin.rpm_key:
+    key: https://repos.insights.digitalocean.com/sonar-agent.asc
+    state: present
+
+- name: Configure DigitalOcean metrics agent repository
+  ansible.builtin.yum_repository:
+    name: sonar
+    description: DigitalOcean metrics agent
+    baseurl: https://repos.insights.digitalocean.com/yum/do-agent/$basearch
+    enabled: true
+    gpgcheck: true
+    gpgkey: https://repos.insights.digitalocean.com/sonar-agent.asc
