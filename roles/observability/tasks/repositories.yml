@@ -1,0 +1,17 @@
+---
+- name: Trust Grafana RPM signing key
+  ansible.builtin.rpm_key:
+    key: "{{ observability_alloy_repo_gpgkey }}"
+    state: present
+
+- name: Configure Grafana DNF repository
+  ansible.builtin.yum_repository:
+    name: "{{ observability_alloy_repo_name }}"
+    description: Grafana stable packages
+    baseurl: "{{ observability_alloy_repo_baseurl }}"
+    enabled: true
+    gpgcheck: true
+    repo_gpgcheck: true
+    gpgkey: "{{ observability_alloy_repo_gpgkey }}"
+    sslverify: true
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt

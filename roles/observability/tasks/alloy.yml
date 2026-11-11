@@ -11,25 +11,6 @@
     - not observability_metrics_enabled
     - "'alloy.service' in ansible_facts.services"
 
-- name: Trust Grafana RPM signing key
-  ansible.builtin.rpm_key:
-    key: "{{ observability_alloy_repo_gpgkey }}"
-    state: present
-  when: observability_metrics_enabled
-
-- name: Configure Grafana DNF repository
-  ansible.builtin.yum_repository:
-    name: "{{ observability_alloy_repo_name }}"
-    description: Grafana stable packages
-    baseurl: "{{ observability_alloy_repo_baseurl }}"
-    enabled: true
-    gpgcheck: true
-    repo_gpgcheck: true
-    gpgkey: "{{ observability_alloy_repo_gpgkey }}"
-    sslverify: true
-    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
-  when: observability_metrics_enabled
-
 - name: Install Grafana Alloy
   ansible.builtin.dnf:
     name: "{{ observability_alloy_package }}"

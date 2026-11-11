@@ -145,6 +145,13 @@ Vault values provide:
 
 ## Managed Host Baseline
 
+Repository definitions are prepared before general package upgrades. The
+operating system release package is updated first, followed by refreshed
+distribution facts and EPEL definitions. On AlmaLinux 10, EPEL metadata targets
+the matching operating system minor release, including after a stable minor
+upgrade. DigitalOcean and Grafana repositories are also configured during this
+phase.
+
 The full playbook enforces a common managed-host baseline before applying
 role-specific configuration. The baseline is implemented as focused roles so
 inventory metadata, package policy, automation-user state, backups, firewall
