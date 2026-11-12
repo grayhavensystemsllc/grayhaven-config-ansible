@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Publish verified MCP database backup sets and prune retained local artifacts."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import closing
+import datetime
+import fnmatch
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+BUNDLE = re.compile(r"mcp-[0-9]{8}T[0-9]{12}Z-[a-z0-9_]{8}\Z")
+DATABASES = {"state.sqlite3", "hierarchy.sqlite3"}
+
+
+class BackupError(RuntimeError):
+    """A backup set could not be safely verified or retained."""
+
+
+def checked_path(value: Path, *, directory: bool = False, optional: bool = False) -> Path | None:
+    path = Path(os.path.abspath(value))
+    for component in reversed((path, *path.parents)):
+        try:
+            info = component.lstat()
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise BackupError("A required backup path is absent") from None
+        if stat.S_ISLNK(info.st_mode):
+            raise BackupError("Backup paths must not contain symbolic links")
+        expected = stat.S_ISDIR if component != path or directory else stat.S_ISREG
+        if not expected(info.st_mode):
+            raise BackupError("A backup path has an unsupported file type")
+    return path
+
+
+def backup_root(value: Path) -> Path:
+    root = checked_path(value, directory=True)
+    if root == Path(root.anchor):
+        raise BackupError("The filesystem root is not a backup directory")
+    return root
+
+
+def sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def verify_ledger(connection: sqlite3.Connection) -> None:
+    if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+        raise BackupError("The builder database failed its integrity check")
+    columns = {row[1] for row in connection.execute('PRAGMA table_info("locations")')}
+    if not {"kind", "item_id", "payload"} <= columns:
+        raise BackupError("The builder database has an unsupported schema")
+
+
+def snapshot_ledger(source: Path, destination: Path, timeout_seconds: float = 60) -> bool:
+    source = checked_path(source, optional=True)
+    if source is None:
+        return False
+    owner = source.stat()
+    if timeout_seconds <= 0 or owner.st_size == 0:
+        raise BackupError("The builder database or snapshot timeout is invalid")
+    destination = Path(os.path.abspath(destination))
+    checked_path(destination.parent, directory=True)
+    if source == destination or destination.name.endswith(("-wal", "-shm", "-journal")):
+        raise BackupError("Unsafe builder snapshot destination")
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(descriptor)
+    writer = None
+    deadline = time.monotonic() + timeout_seconds
+
+    def expired() -> bool:
+        return time.monotonic() >= deadline
+
+    def progress(_status: int, _remaining: int, _total: int) -> None:
+        if expired():
+            raise BackupError("The builder database snapshot timed out")
+
+    try:
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as reader:
+            reader.execute("PRAGMA query_only=ON")
+            reader.set_progress_handler(expired, 1000)
+            verify_ledger(reader)
+            writer = sqlite3.connect(destination.as_uri() + "?mode=rw", uri=True)
+            reader.backup(writer, pages=128, progress=progress, sleep=0.05)
+            writer.execute("PRAGMA journal_mode=DELETE")
+            writer.set_progress_handler(expired, 1000)
+            verify_ledger(writer)
+            writer.close()
+            writer = None
+            with destination.open("rb") as stream:
+                os.fchown(stream.fileno(), owner.st_uid, owner.st_gid)
+                os.fsync(stream.fileno())
+    except BaseException:
+        if writer is not None:
+            writer.close()
+            writer = None
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            destination.with_name(destination.name + suffix).unlink(missing_ok=True)
+        raise
+    return True
+
+
+def export_core(destination: Path) -> None:
+    # Keep the deployed exporter CLI compatible with existing and newer images.
+    subprocess.run(
+        ["podman", "exec", "grayhaven-mcp", "python", "-m", "connector.backup", str(destination)],
+        check=True, capture_output=True, timeout=90,
+    )
+
+
+def create(root: Path, ledger: Path, *, producer=export_core) -> Path:
+    root = backup_root(root)
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    pending = Path(tempfile.mkdtemp(prefix=f".mcp-{stamp}-", suffix=".pending", dir=root))
+    published = root / pending.name.removeprefix(".").removesuffix(".pending")
+    try:
+        # The container's existing UID must be able to write the core snapshot.
+        owner = root.stat()
+        os.chown(pending, owner.st_uid, owner.st_gid)
+        core = pending / "state.sqlite3"
+        producer(core)
+        checked_path(core)
+        if core.stat().st_size == 0:
+            raise BackupError("The core exporter did not produce a database")
+        os.chmod(core, 0o600)
+        with core.open("rb") as stream:
+            os.fsync(stream.fileno())
+        databases = [core.name]
+        if snapshot_ledger(ledger, pending / "hierarchy.sqlite3"):
+            databases.append("hierarchy.sqlite3")
+        elif checked_path(ledger, optional=True) is not None:
+            raise BackupError("The builder database appeared during backup")
+        manifest = {"format": 1, "databases": databases}
+        descriptor = os.open(pending / "manifest.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(manifest, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        verify_bundle(pending)
+        sync_directory(pending)
+        if published.exists() or published.is_symlink():
+            raise BackupError("The backup set already exists")
+        pending.rename(published)
+        sync_directory(root)
+    finally:
+        if pending.exists():
+            shutil.rmtree(pending)
+    return published
+
+
+def verify_bundle(path: Path) -> None:
+    manifest_path = checked_path(path / "manifest.json")
+    manifest = json.loads(manifest_path.read_text())
+    if (not isinstance(manifest, dict) or type(manifest.get("format")) is not int
+            or manifest["format"] != 1
+            or not isinstance(manifest.get("databases"), list)):
+        raise BackupError("A retained backup set has an invalid manifest")
+    names = manifest["databases"]
+    if (not all(isinstance(name, str) for name in names)
+            or len(names) != len(set(names)) or "state.sqlite3" not in names
+            or not set(names) <= DATABASES):
+        raise BackupError("A retained backup set has invalid database names")
+    if {item.name for item in path.iterdir()} != {*names, "manifest.json"}:
+        raise BackupError("A retained backup set contains unexpected files")
+    for name in names:
+        checked_path(path / name)
+
+
+def prune(root: Path, keep_days: int, *, now=time.time) -> None:
+    root = backup_root(root)
+    if type(keep_days) is not int or keep_days < 1:
+        raise BackupError("Backup retention must be a positive number of days")
+    # Match the existing find -mtime +N boundary, retaining N complete days.
+    cutoff = now() - (keep_days + 1) * 86400
+    for path in root.iterdir():
+        info = path.lstat()
+        if info.st_mtime > cutoff:
+            continue
+        if stat.S_ISREG(info.st_mode) and fnmatch.fnmatchcase(path.name, "mcp-*.sqlite3"):
+            path.unlink()
+        elif stat.S_ISDIR(info.st_mode) and BUNDLE.fullmatch(path.name):
+            verify_bundle(path)
+            shutil.rmtree(path)
+    sync_directory(root)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    create_parser = commands.add_parser("create")
+    create_parser.add_argument("directory", type=Path)
+    create_parser.add_argument("ledger", type=Path)
+    prune_parser = commands.add_parser("prune")
+    prune_parser.add_argument("directory", type=Path)
+    prune_parser.add_argument("keep_days", type=int)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "create":
+            create(args.directory, args.ledger)
+        else:
+            prune(args.directory, args.keep_days)
+    except Exception:
+        print("MCP database backup set failed; no successful backup was reported.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - command-line entrypoint
+    raise SystemExit(main())

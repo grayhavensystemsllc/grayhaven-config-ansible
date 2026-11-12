@@ -53,10 +53,11 @@ on repository-change poller events, or by manual invocation.
   basic authentication, per-domain htpasswd files, and certificate renewal on
   web hosts.
 - Manage the private MCP container, persistent state, HTTPS certificate, and
-  verified encrypted database backups on dedicated MCP hosts. Environment-specific
-  public and encrypted configuration is downloaded from the private repository’s
-  `main` branch using the existing registry token with `repo` and `read:packages`
-  scopes. Both files use the same commit and are validated before installation.
+  verified core and builder database backup sets on dedicated MCP hosts.
+  Environment-specific public and encrypted configuration is downloaded from the
+  private repository’s `main` branch using the existing registry token with
+  `repo` and `read:packages` scopes. Both files use the same commit and are
+  validated before installation.
   A minimal container init process forwards signals and reaps exited children.
   Remote maintenance uses a bounded automation-user CPU quota and weight on MCP
   hosts, configured in Vault `operations.yml`.

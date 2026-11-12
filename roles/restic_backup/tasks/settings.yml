@@ -35,7 +35,30 @@
             mcp.data_dir ~ '/state.sqlite3',
             mcp.data_dir ~ '/state.sqlite3-wal',
             mcp.data_dir ~ '/state.sqlite3-shm',
-            mcp.data_dir ~ '/state.sqlite3-journal'
+            mcp.data_dir ~ '/state.sqlite3-journal',
+            mcp.sessions_dir ~ '/notesnook/hierarchy.sqlite3',
+            mcp.sessions_dir ~ '/notesnook/hierarchy.sqlite3-wal',
+            mcp.sessions_dir ~ '/notesnook/hierarchy.sqlite3-shm',
+            mcp.sessions_dir ~ '/notesnook/hierarchy.sqlite3-journal',
+            mcp.sessions_dir ~ '/notesnook/session-lock.sqlite',
+            mcp.sessions_dir ~ '/notesnook/session-lock.sqlite-wal',
+            mcp.sessions_dir ~ '/notesnook/session-lock.sqlite-shm',
+            mcp.sessions_dir ~ '/notesnook/session-lock.sqlite-journal',
+            mcp.sessions_dir ~ '/notesnook/sync-lock.sqlite',
+            mcp.sessions_dir ~ '/notesnook/sync-lock.sqlite-wal',
+            mcp.sessions_dir ~ '/notesnook/sync-lock.sqlite-shm',
+            mcp.sessions_dir ~ '/notesnook/sync-lock.sqlite-journal',
+            mcp.sessions_dir ~ '/notesnook/runbook-lock.sqlite',
+            mcp.sessions_dir ~ '/notesnook/runbook-lock.sqlite-wal',
+            mcp.sessions_dir ~ '/notesnook/runbook-lock.sqlite-shm',
+            mcp.sessions_dir ~ '/notesnook/runbook-lock.sqlite-journal',
+            mcp.sessions_dir ~ '/notesnook/write-lock.sqlite',
+            mcp.sessions_dir ~ '/notesnook/write-lock.sqlite-wal',
+            mcp.sessions_dir ~ '/notesnook/write-lock.sqlite-shm',
+            mcp.sessions_dir ~ '/notesnook/write-lock.sqlite-journal',
+            mcp.sessions_dir ~ '/notesnook/sync.lock',
+            mcp.sessions_dir ~ '/proton/**/*.lock',
+            mcp.backup_dir ~ '/.mcp-*.pending'
           ]
           if grayhaven_role == 'mcp'
           else []
