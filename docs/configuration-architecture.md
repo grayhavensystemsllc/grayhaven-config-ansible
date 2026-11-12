@@ -451,8 +451,23 @@ verifies that artifact before publishing its final filename. Restic includes
 that verified-artifact directory and explicitly excludes the live SQLCipher
 database plus its WAL and SHM sidecars. Local artifacts are pruned only after
 the selected restic repositories complete successfully. On MCP hosts, the
-backup service creates and verifies an encrypted online database snapshot in
-its backup directory before backing up the selected repositories. Bastion
+backup service creates a database backup set in its existing backup directory.
+The running container's existing exporter verifies the encrypted core database;
+a host helper uses SQLite's online backup API and integrity checks for the
+Notesnook builder ledger, copying its encrypted payloads without decrypting them.
+The ledger snapshot preserves its source UID/GID with mode `0600`.
+The helper publishes a timestamped directory containing `state.sqlite3`, the
+optional `hierarchy.sqlite3`, and a component manifest only after verification.
+A missing ledger is recorded as absent for an unused integration; an existing
+unreadable or invalid ledger stops backup before Restic runs. Each database is
+individually consistent; the set is not a cross-database transaction snapshot.
+Local and remote repositories use that same published set. Restic excludes the
+live databases, their SQLite sidecars, transient session and write lock files,
+and unpublished pending sets. Encrypted session/cache files and
+`pending-write.json` remain included. The existing retention setting applies to
+complete sets and older `mcp-*.sqlite3` artifacts after selected repositories
+complete successfully. This works with the existing exporter in older images
+and does not require a new image or vault setting. Bastion
 backups skip the application snapshot step. The scheduled backup and all
 Backupctl repository selections use the same managed workflow.
 

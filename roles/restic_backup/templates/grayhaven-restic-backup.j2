@@ -23,6 +23,7 @@ TIMETRACKER_CONTAINER=grayhaven-timetracker
 MCP_BACKUP_ENABLED={{ 'true' if grayhaven_role == 'mcp' else 'false' }}
 MCP_BACKUP_DIR={{ (mcp.backup_dir if grayhaven_role == 'mcp' else '') | quote }}
 MCP_BACKUP_RETENTION_DAYS={{ (mcp.backup_retention_days | default(14)) | quote }}
+MCP_NOTESNOOK_DATABASE={{ ((mcp.sessions_dir ~ '/notesnook/hierarchy.sqlite3') if grayhaven_role == 'mcp' else '') | quote }}
 
 if (( $# == 0 )); then
   selected_repository=all
@@ -108,23 +109,16 @@ else:
 }
 
 create_mcp_backup() {
-  local backup_name pending_name
   [[ "$MCP_BACKUP_ENABLED" == "true" ]] || return 0
   systemctl is-active --quiet grayhaven-mcp.service
-  backup_name="mcp-$(date -u +%Y%m%dT%H%M%S%NZ).sqlite3"
-  pending_name=".${backup_name}.pending"
-  if ! podman exec grayhaven-mcp python -m connector.backup \
-    "$MCP_BACKUP_DIR/$pending_name"; then
-    rm -f -- "$MCP_BACKUP_DIR/$pending_name"
-    return 1
-  fi
-  mv -- "$MCP_BACKUP_DIR/$pending_name" "$MCP_BACKUP_DIR/$backup_name"
+  /usr/local/sbin/grayhaven-mcp-backup create \
+    "$MCP_BACKUP_DIR" "$MCP_NOTESNOOK_DATABASE"
 }
 
 prune_mcp_backups() {
   [[ "$MCP_BACKUP_ENABLED" == "true" ]] || return 0
-  find "$MCP_BACKUP_DIR" -maxdepth 1 -type f \
-    -name 'mcp-*.sqlite3' -mtime "+$MCP_BACKUP_RETENTION_DAYS" -delete
+  /usr/local/sbin/grayhaven-mcp-backup prune \
+    "$MCP_BACKUP_DIR" "$MCP_BACKUP_RETENTION_DAYS"
 }
 
 create_timetracker_backup() {

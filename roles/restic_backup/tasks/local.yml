@@ -102,6 +102,15 @@
     group: root
     mode: "0755"
 
+- name: Install MCP database backup helper
+  ansible.builtin.copy:
+    src: grayhaven-mcp-backup
+    dest: /usr/local/sbin/grayhaven-mcp-backup
+    owner: root
+    group: root
+    mode: "0755"
+  when: grayhaven_role == 'mcp'
+
 - name: Install local restic backup script
   ansible.builtin.template:
     dest: /usr/local/sbin/grayhaven-restic-backup
