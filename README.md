@@ -34,6 +34,7 @@ on repository-change poller events, or by manual invocation.
 - Run full Ansible convergence from the active control bastion.
 - Manage configured users, SSH access, sudo access, and absent-user homedir
   archival.
+- Pin package management to the Vault-selected operating system release.
 - Prepare compatible package repositories before updating installed operating
   system packages.
 - Enforce a shared managed-host baseline for access, SSH, SELinux, time sync,

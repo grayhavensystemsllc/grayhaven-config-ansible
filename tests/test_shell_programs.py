@@ -120,14 +120,22 @@ class ShellProgramTests(unittest.TestCase):
 
 
     def test_secret_environment_uses_grouped_configuration(self) -> None:
-        for valid_selector in (True, False):
-            with self.subTest(valid_selector=valid_selector), tempfile.TemporaryDirectory() as folder:
+        for valid_selector, valid_network in ((True, True), (False, True), (True, False)):
+            with self.subTest(valid_selector=valid_selector, valid_network=valid_network), tempfile.TemporaryDirectory() as folder:
                 root = pathlib.Path(folder)
                 (root / "config.yml").write_text(json.dumps({
                     "certificate": {"environment": "staging", "email": "operator@example.invalid"},
                 }))
                 (root / "server_configuration.yml").write_text(json.dumps({
                     "network": {"vpc_cidr": "172.28.0.0/16"},
+                }))
+                (root / "policy").mkdir()
+                (root / "policy/infrastructure.yml").write_text(json.dumps({
+                    "defaults": {"region": "zone-alpha"},
+                    "network": {"vpcs": {"primary": {
+                        "environment": "fictional" if valid_network else "another",
+                        "region": "zone-alpha", "cidr": "172.28.0.0/16",
+                    }}},
                 }))
                 (root / "ansible.yml").write_text(json.dumps({
                     "ansible": {"notifications": {"environment": "delivery-alpha"}},
@@ -150,6 +158,7 @@ class ShellProgramTests(unittest.TestCase):
                     RUNNER_SECRET_ENV="$FIXTURE_ROOT/generated-env"
                     VAULT_PASSWORD_FILE="$FIXTURE_ROOT/opaque-password"
                     export ANSIBLE_VAULT_BIN="$FIXTURE_ROOT/provider"
+                    export GRAYHAVEN_ENVIRONMENT=fictional
                     render_secret_environment
                     python3 - <<'PY'
 import json
@@ -164,9 +173,9 @@ PY
                     """,
                     env={"FIXTURE_ROOT": folder},
                 )
-                self.assertEqual(result.returncode == 0, valid_selector)
+                self.assertEqual(result.returncode == 0, valid_selector and valid_network)
                 self.assertEqual(stat.S_IMODE((root / "generated-env").stat().st_mode), 0o600)
-                if valid_selector:
+                if valid_selector and valid_network:
                     self.assertTrue(all(json.loads(result.stdout).values()))
 
     def test_rendered_runtime_values_follow_supplied_inputs(self) -> None:

@@ -1,13 +1,23 @@
 ---
+- name: Select the environment regional network
+  ansible.builtin.set_fact:
+    managed_inventory_vpc_cidr: "{{ managed_inventory_networks | first }}"
+  vars:
+    managed_inventory_networks: >-
+      {{ infrastructure.network.vpcs.values()
+         | selectattr('environment', 'equalto', grayhaven_environment)
+         | selectattr('region', 'equalto', infrastructure.defaults.region)
+         | map(attribute='cidr') | list }}
+
 - name: Validate managed inventory variables
   ansible.builtin.assert:
     that:
-      - network.vpc_cidr is string
-      - network.vpc_cidr | trim | length > 0
+      - managed_inventory_vpc_cidr is string
+      - managed_inventory_vpc_cidr | trim | length > 0
       - >-
-        network.vpc_cidr
+        managed_inventory_vpc_cidr
         is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$')
-    fail_msg: "network.vpc_cidr must be provided as a valid IPv4 CIDR block."
+    fail_msg: "managed_inventory_vpc_cidr must be provided as a valid IPv4 CIDR block."
     quiet: true
 
 - name: Build managed host metadata from inventory
@@ -75,7 +85,7 @@
     managed_inventory_web_ssh_sources: >-
       {{
         (
-          [network.vpc_cidr]
+          [managed_inventory_vpc_cidr]
           + managed_inventory_bastion_private_sources
         )
         | unique

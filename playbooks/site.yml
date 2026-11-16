@@ -211,3 +211,24 @@
         automation_notifications_color: "{{ automation_notifications_colors.warning }}"
       when: automation_notifications_reboot_targets | length > 0
       run_once: true
+
+    - name: Reboot upgraded managed hosts
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when:
+        - system_packages_release_upgrade | default(false)
+        - inventory_hostname != lookup('env', 'GRAYHAVEN_HOSTNAME')
+
+    - name: Schedule control host reboot after the runner completes
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --no-block
+          - --unit=grayhaven-os-release-reboot
+          - --property=After=grayhaven-ansible-runner.service
+          - /usr/bin/systemctl
+          - reboot
+      changed_when: true
+      when:
+        - system_packages_release_upgrade | default(false)
+        - inventory_hostname == lookup('env', 'GRAYHAVEN_HOSTNAME')

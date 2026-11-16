@@ -31,6 +31,8 @@
     owner: root
     group: root
     mode: "0644"
+  register: mcp_quadlet
+  changed_when: mcp_quadlet.changed or system_packages_container_runtime_changed | default(false)
   notify: Restart MCP
 
 - name: Allow nginx to reach the MCP upstream

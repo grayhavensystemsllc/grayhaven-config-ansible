@@ -1,4 +1,25 @@
 ---
+- name: Record operating system upgrade state
+  ansible.builtin.set_fact:
+    system_packages_release_upgrade: "{{ ansible_facts.distribution_version is version(os_release, '<') }}"
+
+- name: Read installed container runtime packages
+  ansible.builtin.command:
+    argv:
+      - rpm
+      - -q
+      - --queryformat
+      - "%{NAME}:%{VERSION}-%{RELEASE}\n"
+      - podman
+      - containers-common
+      - conmon
+      - crun
+      - netavark
+      - aardvark-dns
+  register: system_packages_runtime_before
+  changed_when: false
+  failed_when: false
+
 - name: Configure baseline package repositories
   ansible.builtin.import_tasks: repositories.yml
 
@@ -13,6 +34,27 @@
   ansible.builtin.dnf:
     name: "{{ system_packages.baseline + system_packages.admin }}"
     state: present
+
+- name: Read updated container runtime packages
+  ansible.builtin.command:
+    argv:
+      - rpm
+      - -q
+      - --queryformat
+      - "%{NAME}:%{VERSION}-%{RELEASE}\n"
+      - podman
+      - containers-common
+      - conmon
+      - crun
+      - netavark
+      - aardvark-dns
+  register: system_packages_runtime_after
+  changed_when: false
+
+- name: Record container runtime changes
+  ansible.builtin.set_fact:
+    system_packages_container_runtime_changed: >-
+      {{ system_packages_runtime_before.stdout != system_packages_runtime_after.stdout }}
 
 - name: Ensure Ansible runtime directory exists on bastion hosts
   ansible.builtin.file:

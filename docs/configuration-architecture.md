@@ -147,7 +147,8 @@ Vault values provide:
 
 Repository definitions are prepared before general package upgrades. The
 operating system release package is updated first, followed by refreshed
-distribution facts and EPEL definitions. On AlmaLinux 10, EPEL metadata targets
+distribution facts and EPEL definitions. DNF and EPEL use the approved
+`os_release` from `server_configuration.yml`. On AlmaLinux 10, EPEL metadata targets
 the matching operating system minor release, including after a stable minor
 upgrade. DigitalOcean and Grafana repositories are also configured during this
 phase.
@@ -184,8 +185,10 @@ host's status in the login MOTD. Separate completion notifications list hosts
 with and without a required reboot using the warning and success colors
 respectively. Empty host lists do not produce a notification. A managed
 `grayhaven-refresh-motd.service` refreshes the MOTD at boot so a completed
-reboot clears the login warning before the next convergence run. Ansible does
-not reboot servers automatically.
+reboot clears the login warning before the next convergence run. Approved
+operating system minor upgrades reboot managed hosts and queue the
+control host reboot after the runner finishes. Other package updates continue
+to report when a reboot is required.
 
 Full convergence also installs `grayhaven-reboot-notify.service` on managed
 hosts. The service sends one informational `Server Rebooted` Discord
@@ -410,7 +413,8 @@ For load-balanced environments with two or more web hosts, Ansible also opens
 TCP `8791` between web hosts on private addresses for website deployment fanout.
 
 For SSH from bastion to managed hosts, local firewalld allows the environment
-VPC CIDR from `grayhaven-vault` `network.vpc_cidr` as well as known bastion
+VPC CIDR selected from `grayhaven-vault`
+`policy/infrastructure.yml` using the environment and region as well as known bastion
 private addresses. This prevents active control-node failover from locking the
 new control bastion out of existing managed hosts. DigitalOcean cloud firewalls
 still enforce the tighter bastion source-tag boundary before traffic reaches

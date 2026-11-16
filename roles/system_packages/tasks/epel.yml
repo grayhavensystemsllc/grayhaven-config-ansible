@@ -13,7 +13,7 @@
       (?:(?!^\[).)*?^metalink[ \t]*=[ \t]*)[^\n]*
     replace: >-
       \g<1>https://mirrors.fedoraproject.org/metalink?repo={{ item.repository }}-{{
-      ansible_facts.distribution_version }}&arch={{ item.architecture }}
+      os_release }}&arch={{ item.architecture }}
     mode: "0644"
   loop:
     - file: epel.repo

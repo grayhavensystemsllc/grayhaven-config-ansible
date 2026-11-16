@@ -11,6 +11,8 @@
     owner: root
     group: root
     mode: "0644"
+  register: timetracker_quadlet
+  changed_when: timetracker_quadlet.changed or system_packages_container_runtime_changed | default(false)
   notify: Restart Time Tracker
 
 - name: Apply pending Time Tracker service changes
