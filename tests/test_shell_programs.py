@@ -271,6 +271,8 @@ PY
                 tempfile.TemporaryDirectory() as folder,
             ):
                 root = pathlib.Path(folder)
+                trusted_content = "retained fixture trust\n"
+                (root / "trusted").write_text(trusted_content)
                 result = self.run_bash(
                     r"""
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
@@ -300,14 +302,16 @@ PY
                 )
                 self.assertEqual(result.returncode == 0, trusted or scan_ok)
                 self.assertEqual((root / "scanned").exists(), not trusted)
-                if result.returncode == 0:
+                self.assertEqual((root / "trusted").read_text(), trusted_content)
+                if trusted or not scan_ok:
+                    self.assertFalse((root / "bridge").exists())
+                else:
                     rows = (root / "bridge").read_text().splitlines()
-                    self.assertEqual(len(rows), 0 if trusted else 2)
-                    if rows:
-                        self.assertEqual(
-                            {row.split()[0] for row in rows},
-                            {"192.0.2.7", "new.example.test"},
-                        )
+                    self.assertEqual(len(rows), 2)
+                    self.assertEqual(
+                        {row.split()[0] for row in rows},
+                        {"192.0.2.7", "new.example.test"},
+                    )
 
     def test_runner_failure_is_reported_once_by_its_own_invocation(self) -> None:
         for fault, status in (("direct", 17), ("subshell", 1), ("pipeline", 1)):

@@ -556,7 +556,6 @@ PY
     return 0
   fi
 
-  log "Preparing temporary SSH known hosts for first convergence."
   inventory_known_hosts="$(mktemp)"
 
   while IFS=$'\t' read -r host_alias ssh_target; do
@@ -582,10 +581,13 @@ PY
     done <<< "$scan_output"
   done <<< "$target_rows"
 
-  if running_as_ansible; then
-    install -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
-  else
-    install -o ansible -g ansible -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+  if [[ -s "$inventory_known_hosts" ]]; then
+    log "Preparing temporary SSH known hosts for new inventory targets."
+    if running_as_ansible; then
+      install -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+    else
+      install -o ansible -g ansible -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+    fi
   fi
 
   rm -f "$inventory_known_hosts"

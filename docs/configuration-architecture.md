@@ -294,6 +294,8 @@ deployments target the exact commit SHA from the GitHub webhook payload.
 Each local deployment writes status metadata under
 `/var/lib/grayhaven/website-deploy/status/` for observability support.
 
+Website deployment runtime directories are recreated at boot by tmpfiles rules.
+
 Host TLS mode issues certificates with Let's Encrypt through DNS-01 validation
 using the role-specific DigitalOcean DNS token from the vault. Certbot renewals
 are handled by the system timer installed by the Certbot package. A deploy hook
