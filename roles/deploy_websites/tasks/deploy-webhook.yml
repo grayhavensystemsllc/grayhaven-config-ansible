@@ -42,13 +42,19 @@
     group: root
     mode: "0700"
 
-- name: Ensure website deployment runtime directory exists
-  ansible.builtin.file:
-    path: "{{ deploy_websites_runtime_dir }}"
-    state: directory
+- name: Install website deployment runtime tmpfiles rule
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/grayhaven-website-deploy.conf
     owner: root
     group: root
-    mode: "0755"
+    mode: "0644"
+    content: |
+      d {{ deploy_websites_runtime_dir }} 0755 root root -
+
+- name: Create website deployment runtime directory
+  ansible.builtin.command:
+    cmd: systemd-tmpfiles --create /etc/tmpfiles.d/grayhaven-website-deploy.conf
+  changed_when: false
 
 - name: Ensure website deployment state directory exists
   ansible.builtin.file:

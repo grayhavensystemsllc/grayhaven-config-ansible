@@ -1,0 +1,25 @@
+---
+- name: Validate approved operating system release
+  ansible.builtin.assert:
+    that:
+      - os_release is defined
+      - os_release is string
+      - os_release is match('^[0-9]+\.[0-9]+$')
+    fail_msg: "os_release must specify an approved major and minor release."
+    quiet: true
+
+- name: Create DNF variable directory
+  ansible.builtin.file:
+    path: /etc/dnf/vars
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Pin DNF to the approved operating system release
+  ansible.builtin.copy:
+    dest: /etc/dnf/vars/releasever
+    content: "{{ os_release }}\n"
+    owner: root
+    group: root
+    mode: "0644"

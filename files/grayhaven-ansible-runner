@@ -556,7 +556,6 @@ PY
     return 0
   fi
 
-  log "Preparing temporary SSH known hosts for first convergence."
   inventory_known_hosts="$(mktemp)"
 
   while IFS=$'\t' read -r host_alias ssh_target; do
@@ -582,10 +581,13 @@ PY
     done <<< "$scan_output"
   done <<< "$target_rows"
 
-  if running_as_ansible; then
-    install -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
-  else
-    install -o ansible -g ansible -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+  if [[ -s "$inventory_known_hosts" ]]; then
+    log "Preparing temporary SSH known hosts for new inventory targets."
+    if running_as_ansible; then
+      install -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+    else
+      install -o ansible -g ansible -m 0644 "$inventory_known_hosts" "$INVENTORY_KNOWN_HOSTS"
+    fi
   fi
 
   rm -f "$inventory_known_hosts"
@@ -682,8 +684,8 @@ vault_password_file = sys.argv[2]
 
 with open(os.path.join(vault_checkout_dir, "config.yml"), encoding="utf-8") as config_file:
     config = yaml.safe_load(config_file) or {}
-with open(os.path.join(vault_checkout_dir, "server_configuration.yml"), encoding="utf-8") as server_file:
-    server_configuration = yaml.safe_load(server_file)
+with open(os.path.join(vault_checkout_dir, "policy", "infrastructure.yml"), encoding="utf-8") as infrastructure_file:
+    infrastructure = yaml.safe_load(infrastructure_file)
 with open(os.path.join(vault_checkout_dir, "ansible.yml"), encoding="utf-8") as automation_file:
     automation = yaml.safe_load(automation_file)["ansible"]
 
@@ -720,13 +722,14 @@ certificate_email = certificate.get("email")
 if not certificate_email:
     raise SystemExit("certificate.email is required")
 
-network = server_configuration["network"]
-if not isinstance(network, dict):
-    raise SystemExit("network must be a mapping")
-
-network_vpc_cidr = network.get("vpc_cidr")
-if not network_vpc_cidr:
-    raise SystemExit("network.vpc_cidr is required")
+networks = [
+    network for network in infrastructure["network"]["vpcs"].values()
+    if network["environment"] == os.environ["GRAYHAVEN_ENVIRONMENT"]
+    and network["region"] == infrastructure["defaults"]["region"]
+]
+if len(networks) != 1:
+    raise SystemExit("One environment VPC must match the configured region")
+network_vpc_cidr = networks[0]["cidr"]
 
 inventory_token = bastion.get("digitalocean_inventory_api_token")
 if not inventory_token:

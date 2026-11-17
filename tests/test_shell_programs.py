@@ -120,14 +120,22 @@ class ShellProgramTests(unittest.TestCase):
 
 
     def test_secret_environment_uses_grouped_configuration(self) -> None:
-        for valid_selector in (True, False):
-            with self.subTest(valid_selector=valid_selector), tempfile.TemporaryDirectory() as folder:
+        for valid_selector, valid_network in ((True, True), (False, True), (True, False)):
+            with self.subTest(valid_selector=valid_selector, valid_network=valid_network), tempfile.TemporaryDirectory() as folder:
                 root = pathlib.Path(folder)
                 (root / "config.yml").write_text(json.dumps({
                     "certificate": {"environment": "staging", "email": "operator@example.invalid"},
                 }))
                 (root / "server_configuration.yml").write_text(json.dumps({
                     "network": {"vpc_cidr": "172.28.0.0/16"},
+                }))
+                (root / "policy").mkdir()
+                (root / "policy/infrastructure.yml").write_text(json.dumps({
+                    "defaults": {"region": "zone-alpha"},
+                    "network": {"vpcs": {"primary": {
+                        "environment": "fictional" if valid_network else "another",
+                        "region": "zone-alpha", "cidr": "172.28.0.0/16",
+                    }}},
                 }))
                 (root / "ansible.yml").write_text(json.dumps({
                     "ansible": {"notifications": {"environment": "delivery-alpha"}},
@@ -150,6 +158,7 @@ class ShellProgramTests(unittest.TestCase):
                     RUNNER_SECRET_ENV="$FIXTURE_ROOT/generated-env"
                     VAULT_PASSWORD_FILE="$FIXTURE_ROOT/opaque-password"
                     export ANSIBLE_VAULT_BIN="$FIXTURE_ROOT/provider"
+                    export GRAYHAVEN_ENVIRONMENT=fictional
                     render_secret_environment
                     python3 - <<'PY'
 import json
@@ -164,9 +173,9 @@ PY
                     """,
                     env={"FIXTURE_ROOT": folder},
                 )
-                self.assertEqual(result.returncode == 0, valid_selector)
+                self.assertEqual(result.returncode == 0, valid_selector and valid_network)
                 self.assertEqual(stat.S_IMODE((root / "generated-env").stat().st_mode), 0o600)
-                if valid_selector:
+                if valid_selector and valid_network:
                     self.assertTrue(all(json.loads(result.stdout).values()))
 
     def test_rendered_runtime_values_follow_supplied_inputs(self) -> None:
@@ -262,6 +271,8 @@ PY
                 tempfile.TemporaryDirectory() as folder,
             ):
                 root = pathlib.Path(folder)
+                trusted_content = "retained fixture trust\n"
+                (root / "trusted").write_text(trusted_content)
                 result = self.run_bash(
                     r"""
                     export GRAYHAVEN_UNIT_TEST_SOURCE_ONLY=1
@@ -291,14 +302,16 @@ PY
                 )
                 self.assertEqual(result.returncode == 0, trusted or scan_ok)
                 self.assertEqual((root / "scanned").exists(), not trusted)
-                if result.returncode == 0:
+                self.assertEqual((root / "trusted").read_text(), trusted_content)
+                if trusted or not scan_ok:
+                    self.assertFalse((root / "bridge").exists())
+                else:
                     rows = (root / "bridge").read_text().splitlines()
-                    self.assertEqual(len(rows), 0 if trusted else 2)
-                    if rows:
-                        self.assertEqual(
-                            {row.split()[0] for row in rows},
-                            {"192.0.2.7", "new.example.test"},
-                        )
+                    self.assertEqual(len(rows), 2)
+                    self.assertEqual(
+                        {row.split()[0] for row in rows},
+                        {"192.0.2.7", "new.example.test"},
+                    )
 
     def test_runner_failure_is_reported_once_by_its_own_invocation(self) -> None:
         for fault, status in (("direct", 17), ("subshell", 1), ("pipeline", 1)):

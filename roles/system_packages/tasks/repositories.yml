@@ -1,4 +1,7 @@
 ---
+- name: Configure approved operating system release
+  ansible.builtin.import_tasks: release.yml
+
 - name: Configure DigitalOcean package repository
   ansible.builtin.include_role:
     name: digitalocean_agent

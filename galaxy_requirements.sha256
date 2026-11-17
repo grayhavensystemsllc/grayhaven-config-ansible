@@ -1,5 +1,5 @@
 e211257ea9adbf19a2a3fcd474983a6d6bcfe1c9cc48ad394c46eaa79c3ae13c  ansible-posix-2.2.0.tar.gz
 5fe1c97c2e6f7ac209fa3250459fb95fa45e1e3c9e1f66cf0015fd24e5aa2fbd  community-general-12.6.1.tar.gz
-8d848b434056fdfd2ec02283a614314074b1d5c645c692cb7fa139e684b2e3ac  containers-podman-1.20.2.tar.gz
+86fefb89cc86b213e7d3906068b525311ea91881369a3866616b5c109cd8d431  containers-podman-1.21.2.tar.gz
 239b8cc41d6feda458db65b51dc59e8936339e213c9e658ee616e104a341e612  digitalocean-cloud-1.9.0.tar.gz
 461385335d91f3c4d8afb8f69e1a7c2a9d7656424e482a690b2a1a9e1e34241e  google-cloud-1.13.0.tar.gz
