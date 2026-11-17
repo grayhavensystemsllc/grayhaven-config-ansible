@@ -56,6 +56,14 @@
     system_packages_container_runtime_changed: >-
       {{ system_packages_runtime_before.stdout != system_packages_runtime_after.stdout }}
 
+- name: Install managed container image cleanup
+  ansible.builtin.copy:
+    src: grayhaven-prune-container-images
+    dest: /usr/local/sbin/grayhaven-prune-container-images
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Ensure Ansible runtime directory exists on bastion hosts
   ansible.builtin.file:
     path: "{{ system_packages_ansible_runtime_venv | dirname }}"

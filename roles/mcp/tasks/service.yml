@@ -131,3 +131,12 @@
       - mcp_running_image.stdout | trim == mcp.image_digest
     fail_msg: Running MCP image differs from the approved digest.
     quiet: true
+
+- name: Remove unused older MCP images
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/grayhaven-prune-container-images
+      - "{{ mcp_container_name }}"
+      - "{{ mcp_image_repository }}@{{ mcp.image_digest }}"
+  register: mcp_image_cleanup
+  changed_when: (mcp_image_cleanup.stdout | from_json).removed > 0

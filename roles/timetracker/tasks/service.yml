@@ -56,3 +56,12 @@
       - timetracker_running_image_digest.stdout | trim == timetracker.image_digest
     fail_msg: "Running Time Tracker image does not match the approved digest."
     quiet: true
+
+- name: Remove unused older Time Tracker images
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/grayhaven-prune-container-images
+      - "{{ timetracker_container_name }}"
+      - "{{ timetracker_image_repository }}@{{ timetracker.image_digest }}"
+  register: timetracker_image_cleanup
+  changed_when: (timetracker_image_cleanup.stdout | from_json).removed > 0

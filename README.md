@@ -50,6 +50,8 @@ on repository-change poller events, or by manual invocation.
   generic fallback site when no repository is configured.
 - Manage the Time Tracker WebAuthn relying-party ID and exact HTTPS origin from
   the configured Time Tracker hostname.
+- Remove unused older application images after verifying the deployed container
+  health and approved image digest.
 - Manage Nginx, host TLS certificates, load-balancer backend behavior, dev
   basic authentication, per-domain htpasswd files, and certificate renewal on
   web hosts.
