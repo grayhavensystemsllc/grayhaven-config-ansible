@@ -12,6 +12,7 @@ full-playbook convergence.
 - [Managed Users](#managed-users)
 - [Operator Tmux Console](#operator-tmux-console)
 - [Web Hosting](#web-hosting)
+- [Container Image Retention](#container-image-retention)
 - [Time Tracker](#time-tracker)
 - [Firewalld Policy](#firewalld-policy)
 - [Backups](#backups)
@@ -337,6 +338,15 @@ in the `grayhaven-infra-opentofu` repository and the
 in the
 [grayhaven-vault-example](https://github.com/grayhavensystemsllc/grayhaven-vault-example)
 repository.
+
+[Back to top](#configuration-architecture)
+
+## Container Image Retention
+
+After deployment health and image-digest validation, the application roles remove
+unused older images from the same repository. The running image and images
+referenced by any running or stopped container are retained. Image removal does
+not force deletion or prune unrelated images, volumes, or application data.
 
 [Back to top](#configuration-architecture)
 
