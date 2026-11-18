@@ -132,6 +132,52 @@
     fail_msg: Running MCP image differs from the approved digest.
     quiet: true
 
+- name: Install the MCP administration command
+  ansible.builtin.copy:
+    dest: /usr/local/bin/grayhaven-mcp-admin
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+      tty_args=()
+      if [[ -t 0 && -t 1 ]]; then
+        tty_args=(-t)
+      fi
+      exec sudo /usr/bin/podman exec -i "${tty_args[@]}" {{ mcp_container_name | quote }} python -m connector.admin "$@"
+
+- name: Generate MCP administration Bash completion
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - "{{ mcp_container_name }}"
+      - python
+      - -c
+      - |
+        from importlib.util import find_spec
+        if find_spec("connector.admin_permissions"):
+            from connector.admin import main
+            raise SystemExit(main(["completion", "bash"]))
+  register: mcp_admin_completion
+  changed_when: false
+
+- name: Install MCP administration Bash completion
+  ansible.builtin.copy:
+    dest: /etc/bash_completion.d/grayhaven-mcp-admin
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ mcp_admin_completion.stdout }}\n"
+  when: mcp_admin_completion.stdout | length > 0
+
+- name: Remove MCP administration completion when unavailable
+  ansible.builtin.file:
+    path: /etc/bash_completion.d/grayhaven-mcp-admin
+    state: absent
+  when: mcp_admin_completion.stdout | length == 0
+
 - name: Remove unused older MCP images
   ansible.builtin.command:
     argv:
