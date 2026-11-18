@@ -57,6 +57,7 @@ on repository-change poller events, or by manual invocation.
   web hosts.
 - Manage the private MCP container, persistent state, HTTPS certificate, and
   verified core and builder database backup sets on dedicated MCP hosts.
+  Install the host-side `grayhaven-mcp-admin` command and Bash completion.
   Environment-specific public and encrypted configuration is downloaded from the
   private repository’s `main` branch using the existing registry token with
   `repo` and `read:packages` scopes. Both files use the same commit and are
