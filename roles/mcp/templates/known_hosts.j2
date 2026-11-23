@@ -1,5 +1,5 @@
 {% for host in managed_inventory_hosts | default([]) %}
-{% if host.role in ['bastion', 'web'] %}
+{% if host.role in ['bastion', 'web', 'mcp'] %}
 {% set names = [host.fqdn, host.host_alias, host.host_alias ~ '.internal', host.private_ip] %}
 {% if host.role == 'bastion' %}
 {% set _ = names.append('bastion.' ~ host.fqdn.split('.', 1)[1]) %}
